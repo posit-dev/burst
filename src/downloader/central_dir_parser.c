@@ -427,12 +427,19 @@ static int parse_central_directory(
                 &file_array[i].uid, &file_array[i].gid);
 
             // Parse ZIP64 extra field (0x0001)
-            // The presence of ZIP64 extra field indicates the file uses ZIP64 data descriptor
-            file_array[i].uses_zip64_descriptor = parse_zip64_extra_field(
+            // This updates sizes and offset with 64-bit values if they overflow 32-bit
+            (void)parse_zip64_extra_field(
                 extra_field_ptr, header->extra_field_length, header,
                 &file_array[i].compressed_size,
                 &file_array[i].uncompressed_size,
                 &file_array[i].local_header_offset);
+
+            // ZIP64 data descriptor (24 bytes) is used only when SIZES exceed 32-bit.
+            // A ZIP64 extra field might be present just for the offset (when > 4GB),
+            // but that doesn't affect the data descriptor format - only sizes matter.
+            file_array[i].uses_zip64_descriptor =
+                (header->compressed_size == 0xFFFFFFFF ||
+                 header->uncompressed_size == 0xFFFFFFFF);
         }
 
         // Calculate part index (must be done after ZIP64 parsing updates local_header_offset)
