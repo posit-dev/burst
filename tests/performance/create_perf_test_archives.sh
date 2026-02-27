@@ -196,7 +196,7 @@ measure_burst_compression_ratio() {
     mkdir -p "$measure_input"
 
     ln "$input_file" "$measure_input/data.bin"
-    "$BURST_WRITER" -l 3 -o "$measure_archive" "$measure_input" 2>/dev/null
+    "$BURST_WRITER" -l 3 -o "$measure_archive" "$measure_input" &>/dev/null
 
     local archive_size
     archive_size=$(stat -c%s "$measure_archive")
