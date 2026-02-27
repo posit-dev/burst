@@ -126,7 +126,7 @@ struct file_metadata {
     bool is_symlink;                   // True if (unix_mode & S_IFMT) == S_IFLNK
 
     // ZIP64 tracking
-    bool uses_zip64_descriptor;        // True if ZIP64 extra field present (data descriptor is 24 bytes)
+    bool uses_zip64_descriptor;        // True if sizes exceed 32-bit (data descriptor is 24 bytes)
 };
 
 /**

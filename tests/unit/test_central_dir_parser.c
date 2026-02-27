@@ -1011,6 +1011,242 @@ void test_partial_cd_parse_invalid_part_size(void) {
 }
 
 // =============================================================================
+// ZIP64 Data Descriptor Format Tests
+// =============================================================================
+
+/**
+ * Test: ZIP64 extra field present for offset only, not sizes.
+ *
+ * This is the bug case: when local_header_offset > 4GB but sizes fit in 32-bit,
+ * the ZIP64 extra field contains only the offset. The data descriptor should
+ * still use the 16-byte standard format, NOT the 24-byte ZIP64 format.
+ *
+ * Bug: Previous code set uses_zip64_descriptor = true whenever ZIP64 extra
+ * field was present, causing stream processor to consume 24 bytes instead of 16.
+ */
+void test_zip64_descriptor_offset_only_not_sizes(void) {
+    // Build a minimal ZIP with one file that has:
+    // - compressed_size = 1000 (fits in 32-bit)
+    // - uncompressed_size = 1000 (fits in 32-bit)
+    // - local_header_offset = 0xFFFFFFFF (needs ZIP64 extra field)
+    // - ZIP64 extra field with only the 64-bit offset
+
+    // CDFH (46 bytes) + filename (8) + ZIP64 extra field (12) = 66 bytes
+    // EOCD (22 bytes)
+    // Total: 88 bytes
+    uint8_t buffer[88];
+    memset(buffer, 0, sizeof(buffer));
+
+    // Central directory header at offset 0
+    uint8_t *cdfh = buffer;
+    cdfh[0] = 0x50; cdfh[1] = 0x4b; cdfh[2] = 0x01; cdfh[3] = 0x02;  // signature
+    cdfh[4] = 0x2d; cdfh[5] = 0x00;  // version made by (4.5)
+    cdfh[6] = 0x2d; cdfh[7] = 0x00;  // version needed (4.5)
+    cdfh[8] = 0x08; cdfh[9] = 0x00;  // flags (data descriptor)
+    cdfh[10] = 0x5d; cdfh[11] = 0x00;  // compression method (93 = zstd)
+    // mod time/date = 0
+    cdfh[12] = 0x00; cdfh[13] = 0x00;
+    cdfh[14] = 0x00; cdfh[15] = 0x00;
+    // crc32 = 0x12345678
+    cdfh[16] = 0x78; cdfh[17] = 0x56; cdfh[18] = 0x34; cdfh[19] = 0x12;
+    // compressed_size = 1000 (fits in 32-bit)
+    uint32_t comp_size = 1000;
+    memcpy(cdfh + 20, &comp_size, 4);
+    // uncompressed_size = 1000 (fits in 32-bit)
+    memcpy(cdfh + 24, &comp_size, 4);
+    // filename_length = 8
+    cdfh[28] = 8; cdfh[29] = 0;
+    // extra_field_length = 12 (ZIP64 extra field: 4 byte header + 8 byte offset)
+    cdfh[30] = 12; cdfh[31] = 0;
+    // file comment length = 0
+    cdfh[32] = 0; cdfh[33] = 0;
+    // disk number start = 0
+    cdfh[34] = 0; cdfh[35] = 0;
+    // internal attributes = 0
+    cdfh[36] = 0; cdfh[37] = 0;
+    // external attributes = 0
+    cdfh[38] = 0; cdfh[39] = 0; cdfh[40] = 0; cdfh[41] = 0;
+    // local_header_offset = 0xFFFFFFFF (needs ZIP64)
+    cdfh[42] = 0xFF; cdfh[43] = 0xFF; cdfh[44] = 0xFF; cdfh[45] = 0xFF;
+    // filename "test.bin"
+    memcpy(cdfh + 46, "test.bin", 8);
+
+    // ZIP64 extra field at offset 54 (after filename)
+    uint8_t *extra = cdfh + 54;
+    // Header ID = 0x0001 (ZIP64)
+    extra[0] = 0x01; extra[1] = 0x00;
+    // Data size = 8 (only offset, no sizes since they fit in 32-bit)
+    extra[2] = 0x08; extra[3] = 0x00;
+    // 64-bit local header offset = 5 GB (0x140000000)
+    uint64_t offset_5gb = 5ULL * 1024 * 1024 * 1024;
+    memcpy(extra + 4, &offset_5gb, 8);
+
+    // EOCD at offset 66
+    uint8_t *eocd = buffer + 66;
+    eocd[0] = 0x50; eocd[1] = 0x4b; eocd[2] = 0x05; eocd[3] = 0x06;  // signature
+    // disk numbers = 0
+    eocd[4] = 0; eocd[5] = 0; eocd[6] = 0; eocd[7] = 0;
+    // entries = 1
+    eocd[8] = 1; eocd[9] = 0;
+    eocd[10] = 1; eocd[11] = 0;
+    // CD size = 66 bytes
+    uint32_t cd_size = 66;
+    memcpy(eocd + 12, &cd_size, 4);
+    // CD offset = 0 (relative to start of this buffer, treated as archive)
+    uint32_t cd_offset = 0;
+    memcpy(eocd + 16, &cd_offset, 4);
+    // comment length = 0
+    eocd[20] = 0; eocd[21] = 0;
+
+    struct central_dir_parse_result result;
+    int rc = central_dir_parse(buffer, sizeof(buffer), sizeof(buffer),
+                               BURST_BASE_PART_SIZE, &result);
+
+    TEST_ASSERT_EQUAL_INT(CENTRAL_DIR_PARSE_SUCCESS, rc);
+    TEST_ASSERT_EQUAL_size_t(1, result.num_files);
+    TEST_ASSERT_EQUAL_STRING("test.bin", result.files[0].filename);
+
+    // The key assertion: sizes fit in 32-bit, so data descriptor should be 16 bytes
+    TEST_ASSERT_FALSE_MESSAGE(result.files[0].uses_zip64_descriptor,
+        "uses_zip64_descriptor should be FALSE when only offset needs ZIP64, not sizes");
+
+    // Verify sizes are correct (32-bit values, not updated by ZIP64)
+    TEST_ASSERT_EQUAL_UINT64(1000, result.files[0].compressed_size);
+    TEST_ASSERT_EQUAL_UINT64(1000, result.files[0].uncompressed_size);
+
+    // Verify offset was updated from ZIP64 extra field
+    TEST_ASSERT_EQUAL_UINT64(offset_5gb, result.files[0].local_header_offset);
+
+    central_dir_parse_result_free(&result);
+}
+
+/**
+ * Test: ZIP64 extra field present because sizes overflow 32-bit.
+ *
+ * When compressed_size or uncompressed_size > 4GB, the data descriptor
+ * MUST use the 24-byte ZIP64 format.
+ */
+void test_zip64_descriptor_sizes_overflow(void) {
+    // Build a minimal ZIP with one file that has:
+    // - compressed_size = 0xFFFFFFFF (needs ZIP64)
+    // - uncompressed_size = 0xFFFFFFFF (needs ZIP64)
+    // - local_header_offset = 0 (fits in 32-bit)
+    // - ZIP64 extra field with 64-bit sizes
+
+    // CDFH (46 bytes) + filename (8) + ZIP64 extra field (20) = 74 bytes
+    // EOCD (22 bytes)
+    // Total: 96 bytes
+    uint8_t buffer[96];
+    memset(buffer, 0, sizeof(buffer));
+
+    // Central directory header at offset 0
+    uint8_t *cdfh = buffer;
+    cdfh[0] = 0x50; cdfh[1] = 0x4b; cdfh[2] = 0x01; cdfh[3] = 0x02;  // signature
+    cdfh[4] = 0x2d; cdfh[5] = 0x00;  // version made by (4.5)
+    cdfh[6] = 0x2d; cdfh[7] = 0x00;  // version needed (4.5)
+    cdfh[8] = 0x08; cdfh[9] = 0x00;  // flags (data descriptor)
+    cdfh[10] = 0x5d; cdfh[11] = 0x00;  // compression method (93 = zstd)
+    // mod time/date = 0
+    cdfh[12] = 0x00; cdfh[13] = 0x00;
+    cdfh[14] = 0x00; cdfh[15] = 0x00;
+    // crc32 = 0xDEADBEEF
+    cdfh[16] = 0xEF; cdfh[17] = 0xBE; cdfh[18] = 0xAD; cdfh[19] = 0xDE;
+    // compressed_size = 0xFFFFFFFF (needs ZIP64)
+    cdfh[20] = 0xFF; cdfh[21] = 0xFF; cdfh[22] = 0xFF; cdfh[23] = 0xFF;
+    // uncompressed_size = 0xFFFFFFFF (needs ZIP64)
+    cdfh[24] = 0xFF; cdfh[25] = 0xFF; cdfh[26] = 0xFF; cdfh[27] = 0xFF;
+    // filename_length = 8
+    cdfh[28] = 8; cdfh[29] = 0;
+    // extra_field_length = 20 (ZIP64: 4 header + 8 uncomp + 8 comp)
+    cdfh[30] = 20; cdfh[31] = 0;
+    // file comment length = 0
+    cdfh[32] = 0; cdfh[33] = 0;
+    // disk number start = 0
+    cdfh[34] = 0; cdfh[35] = 0;
+    // internal attributes = 0
+    cdfh[36] = 0; cdfh[37] = 0;
+    // external attributes = 0
+    cdfh[38] = 0; cdfh[39] = 0; cdfh[40] = 0; cdfh[41] = 0;
+    // local_header_offset = 0 (fits in 32-bit)
+    cdfh[42] = 0; cdfh[43] = 0; cdfh[44] = 0; cdfh[45] = 0;
+    // filename "big.file"
+    memcpy(cdfh + 46, "big.file", 8);
+
+    // ZIP64 extra field at offset 54 (after filename)
+    uint8_t *extra = cdfh + 54;
+    // Header ID = 0x0001 (ZIP64)
+    extra[0] = 0x01; extra[1] = 0x00;
+    // Data size = 16 (8 bytes uncomp + 8 bytes comp)
+    extra[2] = 0x10; extra[3] = 0x00;
+    // 64-bit uncompressed size = 10 GB
+    uint64_t size_10gb = 10ULL * 1024 * 1024 * 1024;
+    memcpy(extra + 4, &size_10gb, 8);
+    // 64-bit compressed size = 8 GB
+    uint64_t size_8gb = 8ULL * 1024 * 1024 * 1024;
+    memcpy(extra + 12, &size_8gb, 8);
+
+    // EOCD at offset 74
+    uint8_t *eocd = buffer + 74;
+    eocd[0] = 0x50; eocd[1] = 0x4b; eocd[2] = 0x05; eocd[3] = 0x06;  // signature
+    // disk numbers = 0
+    eocd[4] = 0; eocd[5] = 0; eocd[6] = 0; eocd[7] = 0;
+    // entries = 1
+    eocd[8] = 1; eocd[9] = 0;
+    eocd[10] = 1; eocd[11] = 0;
+    // CD size = 74 bytes
+    uint32_t cd_size = 74;
+    memcpy(eocd + 12, &cd_size, 4);
+    // CD offset = 0
+    uint32_t cd_offset = 0;
+    memcpy(eocd + 16, &cd_offset, 4);
+    // comment length = 0
+    eocd[20] = 0; eocd[21] = 0;
+
+    struct central_dir_parse_result result;
+    int rc = central_dir_parse(buffer, sizeof(buffer), sizeof(buffer),
+                               BURST_BASE_PART_SIZE, &result);
+
+    TEST_ASSERT_EQUAL_INT(CENTRAL_DIR_PARSE_SUCCESS, rc);
+    TEST_ASSERT_EQUAL_size_t(1, result.num_files);
+    TEST_ASSERT_EQUAL_STRING("big.file", result.files[0].filename);
+
+    // The key assertion: sizes overflow 32-bit, so data descriptor should be 24 bytes
+    TEST_ASSERT_TRUE_MESSAGE(result.files[0].uses_zip64_descriptor,
+        "uses_zip64_descriptor should be TRUE when sizes need ZIP64");
+
+    // Verify sizes were updated from ZIP64 extra field
+    TEST_ASSERT_EQUAL_UINT64(size_8gb, result.files[0].compressed_size);
+    TEST_ASSERT_EQUAL_UINT64(size_10gb, result.files[0].uncompressed_size);
+
+    // Verify offset remains 0 (not in ZIP64 extra field)
+    TEST_ASSERT_EQUAL_UINT64(0, result.files[0].local_header_offset);
+
+    central_dir_parse_result_free(&result);
+}
+
+/**
+ * Test: No ZIP64 extra field - all values fit in 32-bit.
+ *
+ * Standard case: no ZIP64 needed, data descriptor should be 16 bytes.
+ */
+void test_no_zip64_extra_field(void) {
+    // Use the existing minimal_zip from the test file
+    // It has no ZIP64 extra field (all values fit in 32-bit)
+    struct central_dir_parse_result result;
+    int rc = central_dir_parse(minimal_zip, sizeof(minimal_zip),
+                               sizeof(minimal_zip), BURST_BASE_PART_SIZE, &result);
+
+    TEST_ASSERT_EQUAL_INT(CENTRAL_DIR_PARSE_SUCCESS, rc);
+    TEST_ASSERT_EQUAL_size_t(1, result.num_files);
+
+    // No ZIP64 extra field, so uses_zip64_descriptor should be false
+    TEST_ASSERT_FALSE_MESSAGE(result.files[0].uses_zip64_descriptor,
+        "uses_zip64_descriptor should be FALSE when no ZIP64 extra field");
+
+    central_dir_parse_result_free(&result);
+}
+
+// =============================================================================
 // Main
 // =============================================================================
 
@@ -1062,6 +1298,11 @@ int main(void) {
     RUN_TEST(test_free_null_result);
     RUN_TEST(test_free_empty_result);
     RUN_TEST(test_double_free_protection);
+
+    // ZIP64 data descriptor format tests
+    RUN_TEST(test_zip64_descriptor_offset_only_not_sizes);
+    RUN_TEST(test_zip64_descriptor_sizes_overflow);
+    RUN_TEST(test_no_zip64_extra_field);
 
     return UNITY_END();
 }
