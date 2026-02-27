@@ -224,8 +224,10 @@ create_compressible_file() {
 
     > "$filename"
     while [ "$(stat -c%s "$filename")" -lt "$target_size" ]; do
-        shuf -n 100 /usr/share/dict/words 2>/dev/null | tr '\n' ' ' >> "$filename" || \
-        echo "Lorem ipsum dolor sit amet consectetur adipiscing elit " >> "$filename"
+        local words
+        words=$(shuf -n 100 /usr/share/dict/words 2>/dev/null) || \
+            words="Lorem ipsum dolor sit amet consectetur adipiscing elit"
+        printf '%s ' $words >> "$filename"
     done
     truncate -s "$target_size" "$filename"
 }
