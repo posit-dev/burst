@@ -21,6 +21,15 @@
 #   xlarge-manyfiles - 10 GiB (~25000 files)
 #   xxlarge       - 50 GiB (single large file)
 #
+# Content Generation:
+#   All content files are derived from a 200 MiB calibrated seed generated once
+#   at startup. The seed is built by interleaving 32 KiB blocks of shuffled
+#   dictionary words (compressible) and /dev/urandom (incompressible) at a
+#   ratio tuned so the resulting burst-writer archive is 45-65% of the logical
+#   size. Files <= 200 MiB take a random section of the seed; larger files
+#   concatenate seed copies. This ensures S3 download benchmarks reflect
+#   realistic data volumes.
+#
 # Usage:
 #   ./create_perf_test_archives.sh [archive_name...]
 #
@@ -31,6 +40,7 @@
 #   - burst-writer built in build/
 #   - aws CLI configured with appropriate credentials
 #   - 7zz installed for archive validation
+#   - /usr/share/dict/words for compressible content generation
 #
 # Environment variables:
 #   BURST_PERF_BUCKET  - S3 bucket for test archives (default: burst-performance-tests)
@@ -81,7 +91,7 @@ declare -A ARCHIVE_CONFIGS=(
     ["large"]="1073741824:single:1"            # 1 GiB
     ["large-manyfiles"]="1073741824:many:10000"
     ["xlarge"]="10737418240:single:1"          # 10 GiB
-    ["xlarge-manyfiles"]="10737418240:many:250000"
+    ["xlarge-manyfiles"]="10737418240:many:25000"
     ["xxlarge"]="53687091200:single:1"         # 50 GiB
 )
 
@@ -119,6 +129,12 @@ check_prerequisites() {
         missing=1
     fi
 
+    if [ ! -s /usr/share/dict/words ]; then
+        echo -e "${RED}Error: /usr/share/dict/words not found or empty${NC}"
+        echo "  Required for generating compressible content"
+        missing=1
+    fi
+
     if [ $missing -eq 1 ]; then
         return 1
     fi
@@ -127,109 +143,140 @@ check_prerequisites() {
     return 0
 }
 
-# Create semi-compressible data file
-# Uses a mix of random and repeated data to achieve moderate compression
-# Optimized: generates seed pool then copies data to reach target size
-# Usage: create_semi_compressible_file <filename> <size_bytes>
-create_semi_compressible_file() {
-    local filename="$1"
-    local target_size="$2"
-
-    echo "  Creating semi-compressible file ($((target_size / 1024 / 1024)) MiB)..."
-
-    local block_size=$((1024 * 1024))  # 1 MiB blocks
-
-    # Determine seed pool size (100 MiB for files > 500 MiB, otherwise 20% of target)
-    local seed_size
-    if [ "$target_size" -gt 524288000 ]; then
-        seed_size=$((100 * 1024 * 1024))  # 100 MiB seed for large files
-    else
-        seed_size=$((target_size / 5))  # 20% for smaller files
-        if [ "$seed_size" -lt $((10 * 1024 * 1024)) ]; then
-            seed_size=$((10 * 1024 * 1024))  # Minimum 10 MiB seed
-        fi
-        if [ "$seed_size" -gt "$target_size" ]; then
-            seed_size="$target_size"
-        fi
-    fi
-
-    local seed_blocks=$((seed_size / block_size))
-
-    echo "  Generating seed pool ($((seed_size / 1024 / 1024)) MiB)..."
-
-    # Create the file and generate seed pool
-    > "$filename"
-
-    for ((i = 0; i < seed_blocks; i++)); do
-        # Alternate between random and semi-predictable data
-        if ((i % 4 == 0)); then
-            # Every 4th block is random
-            dd if=/dev/urandom bs="$block_size" count=1 2>/dev/null >> "$filename"
-        else
-            # Other blocks are semi-compressible (repeated patterns with variation)
-            dd if=/dev/urandom bs=256 count=1 2>/dev/null | \
-                head -c 256 | \
-                perl -e 'my $p = <STDIN>; print $p x 4096;' | \
-                head -c "$block_size" >> "$filename"
-        fi
+# Generate 200 MiB blob of shuffled dictionary words
+# Output written to $DICT_BLOB
+generate_dict_blob() {
+    local target_size=$((200 * 1024 * 1024))
+    echo "Generating 200 MiB dictionary word blob..."
+    > "$DICT_BLOB"
+    while [ "$(stat -c%s "$DICT_BLOB")" -lt "$target_size" ]; do
+        shuf /usr/share/dict/words | tr '\n' ' ' >> "$DICT_BLOB"
     done
-
-    local current_size
-    current_size=$(stat -c%s "$filename")
-
-    # If target size is larger than seed, replicate data by copying from file itself
-    if [ "$current_size" -lt "$target_size" ]; then
-        echo "  Extending file by copying seed data..."
-
-        while [ "$current_size" -lt "$target_size" ]; do
-            local remaining=$((target_size - current_size))
-            local copy_size="$current_size"
-
-            # Don't copy more than we need
-            if [ "$copy_size" -gt "$remaining" ]; then
-                copy_size="$remaining"
-            fi
-
-            # Copy data from beginning of file to end
-            dd if="$filename" bs="$block_size" count=$((copy_size / block_size)) 2>/dev/null >> "$filename"
-
-            # Handle any remaining bytes
-            local copied_bytes=$((copy_size / block_size * block_size))
-            if [ "$copied_bytes" -lt "$copy_size" ]; then
-                dd if="$filename" bs=1 skip="$copied_bytes" count=$((copy_size - copied_bytes)) 2>/dev/null >> "$filename"
-            fi
-
-            current_size=$(stat -c%s "$filename")
-
-            # Progress report for large files
-            if [ "$target_size" -gt 1073741824 ]; then
-                echo "    Progress: $((current_size / 1024 / 1024)) / $((target_size / 1024 / 1024)) MiB"
-            fi
-        done
-    fi
-
-    # Ensure exact size
-    truncate -s "$target_size" "$filename"
-
-    local actual_size
-    actual_size=$(stat -c%s "$filename")
-    echo "  Created file: $((actual_size / 1024 / 1024)) MiB"
+    truncate -s "$target_size" "$DICT_BLOB"
+    echo "  Done: $(( $(stat -c%s "$DICT_BLOB") / 1024 / 1024 )) MiB"
 }
 
-# Create compressible file using dictionary words
-# Usage: create_compressible_file <filename> <size_bytes>
-create_compressible_file() {
+# Generate a mixed-content file by interleaving 32 KiB dict and random blocks
+# Usage: generate_mixed_file <filename> <size_bytes> <dict_pct>
+#   dict_pct: integer 0-100, percentage of blocks sourced from DICT_BLOB
+generate_mixed_file() {
     local filename="$1"
-    local target_size="$2"
+    local size_bytes="$2"
+    local dict_pct="$3"
+
+    local block_size=32768  # 32 KiB
+    local num_blocks=$(( size_bytes / block_size ))
+    local dict_total_blocks=$(( 200 * 1024 * 1024 / block_size ))  # 6400 blocks
+    local dict_idx=0
 
     > "$filename"
-    while [ "$(stat -c%s "$filename")" -lt "$target_size" ]; do
-        local words
-        words=$(shuf -n 100 /usr/share/dict/words 2>/dev/null) || \
-            words="Lorem ipsum dolor sit amet consectetur adipiscing elit"
-        printf '%s ' $words >> "$filename"
+
+    for (( i = 0; i < num_blocks; i++ )); do
+        if (( RANDOM % 100 < dict_pct )); then
+            dd if="$DICT_BLOB" bs="$block_size" skip="$dict_idx" count=1 2>/dev/null >> "$filename"
+            dict_idx=$(( (dict_idx + 1) % dict_total_blocks ))
+        else
+            dd if=/dev/urandom bs="$block_size" count=1 2>/dev/null >> "$filename"
+        fi
     done
-    truncate -s "$target_size" "$filename"
+
+    truncate -s "$size_bytes" "$filename"
+}
+
+# Run burst-writer on a file and return archive_size * 100 / input_size
+# Usage: ratio=$(measure_burst_compression_ratio <file>)
+measure_burst_compression_ratio() {
+    local input_file="$1"
+    local input_size
+    input_size=$(stat -c%s "$input_file")
+
+    local measure_dir="$TEMP_DIR/measure_$$"
+    local measure_input="$measure_dir/input"
+    local measure_archive="$measure_dir/archive.zip"
+    mkdir -p "$measure_input"
+
+    ln "$input_file" "$measure_input/data.bin"
+    "$BURST_WRITER" -l 3 -o "$measure_archive" "$measure_input" 2>/dev/null
+
+    local archive_size
+    archive_size=$(stat -c%s "$measure_archive")
+
+    rm -rf "$measure_dir"
+
+    echo $(( archive_size * 100 / input_size ))
+}
+
+# Calibrate CALIBRATED_SEED by adjusting CALIBRATED_DICT_PCT until burst-writer
+# produces an archive that is 45-65% of the input size.
+calibrate_seed() {
+    local seed_size=$((200 * 1024 * 1024))
+    echo "Calibrating seed for target compression ratio (45-65%)..."
+
+    for (( attempt = 0; attempt < 8; attempt++ )); do
+        echo "  Attempt $((attempt + 1)): dict_pct=$CALIBRATED_DICT_PCT"
+        echo "  Generating 200 MiB mixed seed..."
+        generate_mixed_file "$CALIBRATED_SEED" "$seed_size" "$CALIBRATED_DICT_PCT"
+
+        echo "  Measuring compression ratio..."
+        local ratio
+        ratio=$(measure_burst_compression_ratio "$CALIBRATED_SEED")
+        echo "  Compression ratio: ${ratio}% (archive/input)"
+
+        if (( ratio >= 45 && ratio <= 65 )); then
+            echo -e "${GREEN}  Calibration successful: ratio=${ratio}%, dict_pct=${CALIBRATED_DICT_PCT}${NC}"
+            return 0
+        elif (( ratio < 45 )); then
+            # Too compressible — reduce dict content, add more random data
+            CALIBRATED_DICT_PCT=$(( CALIBRATED_DICT_PCT - 15 ))
+        else
+            # Not compressible enough — add more dict content
+            CALIBRATED_DICT_PCT=$(( CALIBRATED_DICT_PCT + 15 ))
+        fi
+
+        # Clamp to [5, 95]
+        if (( CALIBRATED_DICT_PCT < 5 )); then
+            CALIBRATED_DICT_PCT=5
+        fi
+        if (( CALIBRATED_DICT_PCT > 95 )); then
+            CALIBRATED_DICT_PCT=95
+        fi
+    done
+
+    echo -e "${YELLOW}Warning: Could not achieve 45-65% ratio after 8 attempts. Using dict_pct=${CALIBRATED_DICT_PCT}${NC}"
+}
+
+# Create a content file derived from the calibrated seed
+# Files <= 200 MiB: extract a random 512-byte-aligned section
+# Files > 200 MiB: concatenate seed copies + partial remainder
+# Usage: create_content_file <filename> <size_bytes>
+create_content_file() {
+    local filename="$1"
+    local size_bytes="$2"
+
+    local seed_size=$((200 * 1024 * 1024))
+
+    if (( size_bytes <= seed_size )); then
+        local max_offset=$(( seed_size - size_bytes ))
+        local offset=0
+        if (( max_offset > 512 )); then
+            local max_offset_blocks=$(( max_offset / 512 ))
+            offset=$(( (RANDOM * 32768 + RANDOM) % max_offset_blocks * 512 ))
+        fi
+        dd if="$CALIBRATED_SEED" iflag=skip_bytes,count_bytes \
+            skip="$offset" count="$size_bytes" bs=65536 of="$filename" 2>/dev/null
+    else
+        > "$filename"
+        local written=0
+        while (( written + seed_size <= size_bytes )); do
+            cat "$CALIBRATED_SEED" >> "$filename"
+            written=$(( written + seed_size ))
+        done
+        local remaining=$(( size_bytes - written ))
+        if (( remaining > 0 )); then
+            head -c "$remaining" "$CALIBRATED_SEED" >> "$filename"
+        fi
+        truncate -s "$size_bytes" "$filename"
+    fi
 }
 
 # Generate random lowercase string
@@ -262,7 +309,9 @@ create_single_file_archive() {
     mkdir -p "$input_dir"
 
     # Create single large file
-    create_semi_compressible_file "$input_dir/data.bin" "$target_size"
+    echo "  Creating content file ($((target_size / 1024 / 1024)) MiB)..."
+    create_content_file "$input_dir/data.bin" "$target_size"
+    echo "  Created file: $(($(stat -c%s "$input_dir/data.bin") / 1024 / 1024)) MiB"
 
     # Create BURST archive
     echo "Creating BURST archive..."
@@ -304,7 +353,7 @@ create_single_file_archive() {
 }
 
 # Create many-files archive
-# Optimized: creates template files and hardlinks them to reduce generation time
+# Each file is generated from a unique section of the calibrated seed.
 # Usage: create_many_files_archive <name> <target_size_bytes> <file_count>
 create_many_files_archive() {
     local name="$1"
@@ -316,49 +365,14 @@ create_many_files_archive() {
 
     local work_dir="$TEMP_DIR/$name"
     local input_dir="$work_dir/input"
-    local template_dir="$work_dir/templates"
     local archive_file="$work_dir/archive.zip"
 
     mkdir -p "$input_dir"
-    mkdir -p "$template_dir"
 
     # Calculate target file size (with some variation)
     local avg_file_size=$((target_size / file_count))
     local min_file_size=$((avg_file_size / 2))
     local max_file_size=$((avg_file_size * 3 / 2))
-
-    # Determine number of template files to create
-    # Use 1-2% of total files as templates, minimum 50, maximum 500
-    local template_count=$((file_count / 75))
-    if [ "$template_count" -lt 50 ]; then
-        template_count=50
-    fi
-    if [ "$template_count" -gt 500 ]; then
-        template_count=500
-    fi
-    if [ "$template_count" -gt "$file_count" ]; then
-        template_count="$file_count"
-    fi
-
-    echo "Creating $template_count template files (will hardlink to create $file_count total files)..."
-
-    # Create template files
-    local templates=()
-    for ((i = 0; i < template_count; i++)); do
-        local file_size=$(random_size "$min_file_size" "$max_file_size")
-        local template_file="$template_dir/template_$(printf "%04d" "$i").txt"
-
-        create_compressible_file "$template_file" "$file_size"
-        templates+=("$template_file")
-
-        # Progress every 50 templates
-        if (( i > 0 && i % 50 == 0 )); then
-            echo "  Progress: $i/$template_count templates created..."
-        fi
-    done
-
-    echo -e "${GREEN}Created $template_count template files${NC}"
-    echo "Creating hardlinks to generate $file_count files..."
 
     # Distribute files across subdirectories (100 files per directory)
     local files_per_dir=100
@@ -366,21 +380,19 @@ create_many_files_archive() {
     local created=0
     local total_size=0
 
+    echo "Creating $file_count content files (avg $((avg_file_size / 1024)) KiB each)..."
+
     for ((dir_idx = 0; dir_idx < num_dirs; dir_idx++)); do
         local subdir="$input_dir/dir_$(printf "%04d" "$dir_idx")"
         mkdir -p "$subdir"
 
         for ((file_idx = 0; file_idx < files_per_dir && created < file_count; file_idx++)); do
-            local filename="$subdir/file_$(printf "%06d" "$created").txt"
-
-            # Randomly select a template to hardlink
-            local template_idx=$((RANDOM % template_count))
-            local template_file="${templates[$template_idx]}"
-
-            ln "$template_file" "$filename"
-
+            local filename="$subdir/file_$(printf "%06d" "$created").bin"
             local file_size
-            file_size=$(stat -c%s "$filename")
+            file_size=$(random_size "$min_file_size" "$max_file_size")
+
+            create_content_file "$filename" "$file_size"
+
             total_size=$((total_size + file_size))
             created=$((created + 1))
         done
@@ -392,9 +404,6 @@ create_many_files_archive() {
     done
 
     echo -e "${GREEN}Created $created files ($((total_size / 1024 / 1024)) MiB uncompressed)${NC}"
-
-    # Clean up template directory
-    rm -rf "$template_dir"
 
     # Create BURST archive
     echo "Creating BURST archive..."
@@ -504,6 +513,11 @@ echo ""
 TEMP_DIR=$(mktemp -d)
 echo "Working directory: $TEMP_DIR"
 
+# Global paths for calibrated content generation
+DICT_BLOB="$TEMP_DIR/dict_blob.bin"
+CALIBRATED_SEED="$TEMP_DIR/calibrated_seed.bin"
+CALIBRATED_DICT_PCT=50
+
 # Cleanup on exit
 cleanup() {
     echo ""
@@ -512,6 +526,13 @@ cleanup() {
     echo -e "${GREEN}Cleanup complete${NC}"
 }
 trap cleanup EXIT
+
+# Generate calibrated seed once before creating any archives
+echo ""
+echo -e "${BLUE}--- Generating calibrated content seed ---${NC}"
+generate_dict_blob
+calibrate_seed
+echo ""
 
 # Create archives
 for name in "${archives_to_create[@]}"; do
