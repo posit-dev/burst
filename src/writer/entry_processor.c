@@ -38,12 +38,15 @@ static struct zip_local_header* build_local_file_header(const char *filename, bo
 
     memset(lfh, 0, sizeof(struct zip_local_header));
     lfh->signature = ZIP_LOCAL_FILE_HEADER_SIG;
-    lfh->flags = ZIP_FLAG_DATA_DESCRIPTOR;
 
     if (is_empty) {
+        // Empty files have known sizes (0) at LFH time, so no data descriptor needed
+        lfh->flags = 0;
         lfh->version_needed = ZIP_VERSION_STORE;
         lfh->compression_method = ZIP_METHOD_STORE;
     } else {
+        // Non-empty files use data descriptor since sizes are unknown until compression
+        lfh->flags = ZIP_FLAG_DATA_DESCRIPTOR;
         lfh->version_needed = ZIP_VERSION_ZSTD;
         lfh->compression_method = ZIP_METHOD_ZSTD;
     }
@@ -250,7 +253,7 @@ int process_entry(struct burst_writer *writer,
             return 0;
         }
 
-        if (burst_writer_add_file(writer, input, lfh, lfh_len, is_empty,
+        if (burst_writer_add_file(writer, input, lfh, lfh_len,
                                   file_stat->st_mode, file_stat->st_uid, file_stat->st_gid) == 0) {
             success = 1;
         } else {
