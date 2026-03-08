@@ -253,13 +253,17 @@ int burst_writer_add_file(struct burst_writer *writer,
                           FILE *input_file,
                           struct zip_local_header *lfh,
                           int lfh_len,
-                          bool is_header_only,
                           uint32_t unix_mode,
                           uint32_t uid,
                           uint32_t gid) {
     if (!writer || !input_file || !lfh || lfh_len <= 0) {
         return -1;
     }
+
+    // Determine if this is a header-only file (empty, no data descriptor)
+    // based on whether the LFH has the data descriptor flag set
+    // Used only in the case of empty files, so we do not read data in this case.
+    bool is_header_only = !(lfh->flags & ZIP_FLAG_DATA_DESCRIPTOR);
 
     // Get file size
     long file_size = 0;
@@ -322,14 +326,14 @@ int burst_writer_add_file(struct burst_writer *writer,
 
     size_t bytes_read;
 
-    // Handle header-only files (empty files with STORE method, symlinks)
-    // These have no data to compress, so skip directly to the data descriptor
+    // Handle header-only files (empty files with STORE method)
+    // These have no data to compress and no data descriptor (sizes known at LFH time)
     if (is_header_only) {
-        // For STORE method empty files: no data bytes at all
-        // The CRC is 0, sizes are 0, and we just write the data descriptor
+        // For STORE method empty files: no data bytes, no descriptor needed
+        // CRC is 0, sizes are 0, and these are already in the LFH
         free(input_buffer);
         free(output_buffer);
-        goto write_descriptor;
+        goto file_done;
     }
 
     // Otherwise this is a regular and non-empty file, so start writing compressed zstandard frames.
@@ -488,7 +492,6 @@ int burst_writer_add_file(struct burst_writer *writer,
         }
     }
 
-write_descriptor:
     // Write data descriptor (use ZIP64 if sizes exceed 32-bit limit)
     if (write_data_descriptor(writer, entry->crc32, entry->compressed_size,
                              entry->uncompressed_size, entry->used_zip64_descriptor) != 0) {
@@ -496,6 +499,7 @@ write_descriptor:
         return -1;
     }
 
+file_done:
     // Update statistics
     writer->total_uncompressed += entry->uncompressed_size;
     writer->total_compressed += entry->compressed_size;

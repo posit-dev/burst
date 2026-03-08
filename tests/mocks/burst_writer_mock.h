@@ -18,7 +18,6 @@ int burst_writer_add_file(void *writer,
                           FILE *input_file,
                           void *lfh,
                           int lfh_len,
-                          bool is_header_only,
                           uint32_t unix_mode,
                           uint32_t uid,
                           uint32_t gid);

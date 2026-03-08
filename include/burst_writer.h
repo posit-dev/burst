@@ -70,9 +70,10 @@ void burst_writer_destroy(struct burst_writer *writer);
 // Add a file to the archive
 // input_file: Open file handle to read from (caller must close)
 // lfh: Fully-constructed local file header (caller allocates)
+//      If lfh->flags has ZIP_FLAG_DATA_DESCRIPTOR set, the file is compressed and
+//      a data descriptor is written after the compressed data.
+//      If the flag is NOT set, the file is treated as empty (header-only, no data).
 // lfh_len: Total size of local file header including filename and extra fields
-// is_header_only: True for empty files or symlinks (no compressed data frames)
-//                 When true, ensures proper alignment by inserting padding LFH if needed
 // unix_mode: Unix file mode (permissions + file type) for central directory
 // uid: Unix user ID for extra field
 // gid: Unix group ID for extra field
@@ -80,7 +81,6 @@ int burst_writer_add_file(struct burst_writer *writer,
                           FILE *input_file,
                           struct zip_local_header *lfh,
                           int lfh_len,
-                          bool is_header_only,
                           uint32_t unix_mode,
                           uint32_t uid,
                           uint32_t gid);
