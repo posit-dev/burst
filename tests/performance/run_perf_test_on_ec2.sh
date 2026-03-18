@@ -193,6 +193,24 @@ echo -e "${BLUE}Step 3: Launching EC2 spot instance${NC}"
 # Read bootstrap script and encode as base64 for user-data
 USER_DATA=$(base64 -w0 "$SCRIPT_DIR/ec2_bootstrap.sh")
 
+# Build tag-specifications as JSON to avoid AWS CLI shorthand issues with
+# commas in tag values (e.g. the comma-separated $ARCHIVES list).
+TAG_SPECS=$(jq -n \
+    --arg instance_type "$INSTANCE_TYPE" \
+    --arg binary_s3_path "$BINARY_S3_PATH" \
+    --arg scripts_s3_path "$SCRIPTS_S3_PATH" \
+    --arg results_prefix "$RESULTS_PREFIX" \
+    --arg init_script "$INIT_SCRIPT" \
+    --arg archives "$ARCHIVES" \
+    '[{ResourceType:"instance",Tags:[
+        {Key:"Name",Value:("burst-perf-test-"+$instance_type)},
+        {Key:"BurstBinaryS3Path",Value:$binary_s3_path},
+        {Key:"BurstScriptsS3Path",Value:$scripts_s3_path},
+        {Key:"BurstResultsPrefix",Value:$results_prefix},
+        {Key:"BurstInitScript",Value:$init_script},
+        {Key:"BurstTestArchives",Value:$archives}
+    ]}]')
+
 # Launch instance with tags
 INSTANCE_ID=$(aws ec2 run-instances \
     --image-id "$UBUNTU_AMI" \
@@ -202,14 +220,7 @@ INSTANCE_ID=$(aws ec2 run-instances \
     --iam-instance-profile "Name=$INSTANCE_PROFILE" \
     --security-groups "$SECURITY_GROUP" \
     --user-data "$USER_DATA" \
-    --tag-specifications "ResourceType=instance,Tags=[
-        {Key=Name,Value=burst-perf-test-$INSTANCE_TYPE},
-        {Key=BurstBinaryS3Path,Value=$BINARY_S3_PATH},
-        {Key=BurstScriptsS3Path,Value=$SCRIPTS_S3_PATH},
-        {Key=BurstResultsPrefix,Value=$RESULTS_PREFIX},
-        {Key=BurstInitScript,Value=$INIT_SCRIPT},
-        {Key=BurstTestArchives,Value=$ARCHIVES}
-    ]" \
+    --tag-specifications "$TAG_SPECS" \
     --query 'Instances[0].InstanceId' \
     --output text \
     --region "$AWS_REGION")
