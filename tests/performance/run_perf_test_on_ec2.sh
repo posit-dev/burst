@@ -52,6 +52,8 @@ INSTANCE_PROFILE="BurstPerformanceTestInstance"
 # Security group (must exist in AWS account, needs outbound HTTPS)
 SECURITY_GROUP="burst-perf-test-sg"
 
+SUBNET_ID="subnet-027bdf685962a3c0c"
+
 # Global variable for cleanup
 INSTANCE_ID=""
 
@@ -202,13 +204,21 @@ TAG_SPECS=$(jq -n \
     --arg results_prefix "$RESULTS_PREFIX" \
     --arg init_script "$INIT_SCRIPT" \
     --arg archives "$ARCHIVES" \
+    --arg rsowner "mike.baynton@posit.co" \
+    --arg rsenvironment "development" \
+    --arg rsproject "hostedapps" \
+    --arg rssubsystem "burst" \
     '[{ResourceType:"instance",Tags:[
         {Key:"Name",Value:("burst-perf-test-"+$instance_type)},
         {Key:"BurstBinaryS3Path",Value:$binary_s3_path},
         {Key:"BurstScriptsS3Path",Value:$scripts_s3_path},
         {Key:"BurstResultsPrefix",Value:$results_prefix},
         {Key:"BurstInitScript",Value:$init_script},
-        {Key:"BurstTestArchives",Value:$archives}
+        {Key:"BurstTestArchives",Value:$archives},
+        {Key:"rs:owner",Value:$rsowner},
+        {Key:"rs:environment",Value:$rsenvironment},
+        {Key:"rs:project",Value:$rsproject},
+        {Key:"rs:subsystem",Value:$rssubsystem},
     ]}]')
 
 # Launch instance with tags
@@ -216,6 +226,7 @@ INSTANCE_ID=$(aws ec2 run-instances \
     --image-id "$UBUNTU_AMI" \
     --instance-type "$INSTANCE_TYPE" \
     --instance-market-options 'MarketType=spot' \
+    --subnet-id "$SUBNET_ID" \
     --instance-initiated-shutdown-behavior terminate \
     --iam-instance-profile "Name=$INSTANCE_PROFILE" \
     --security-groups "$SECURITY_GROUP" \
