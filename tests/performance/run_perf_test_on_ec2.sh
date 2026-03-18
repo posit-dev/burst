@@ -52,8 +52,6 @@ INSTANCE_PROFILE="BurstPerformanceTestInstance"
 # Security group (must exist in AWS account, needs outbound HTTPS)
 SECURITY_GROUP="burst-perf-test-sg"
 
-SUBNET_ID="subnet-027bdf685962a3c0c"
-
 # Global variable for cleanup
 INSTANCE_ID=""
 
@@ -226,7 +224,6 @@ INSTANCE_ID=$(aws ec2 run-instances \
     --image-id "$UBUNTU_AMI" \
     --instance-type "$INSTANCE_TYPE" \
     --instance-market-options 'MarketType=spot' \
-    --subnet-id "$SUBNET_ID" \
     --instance-initiated-shutdown-behavior terminate \
     --iam-instance-profile "Name=$INSTANCE_PROFILE" \
     --security-groups "$SECURITY_GROUP" \
