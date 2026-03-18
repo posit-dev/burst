@@ -1,0 +1,251 @@
+name: BURST Performance Tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch_ref:
+        description: 'Branch or ref to build burst-downloader from'
+        required: true
+        default: 'main'
+      s3_results_prefix:
+        description: 'S3 prefix for results (e.g., perf-run-2025-01-08)'
+        required: true
+      test_instance_types:
+        description: 'Comma-separated instance types to test'
+        required: false
+        default: 'i7ie.xlarge,i7ie.3xlarge,i7ie.12xlarge,m6id.4xlarge'
+      test_init_scripts:
+        description: 'Comma-separated init scripts to test'
+        required: false
+        default: 'setup_btrfs_root.sh,setup_btrfs_user.sh'
+      test_archives:
+        description: 'Comma-separated archive names to test'
+        required: false
+        default: 'verysmall,small,medium,medium-manyfiles,large,large-manyfiles,xlarge,xlarge-manyfiles,xxlarge'
+      cooldown_minutes:
+        description: 'Cooldown minutes between instance types (to avoid S3 performance interference)'
+        required: false
+        default: '45'
+
+permissions:
+  id-token: write  # Required for OIDC authentication
+  contents: read
+
+env:
+  AWS_REGION: us-west-2
+
+jobs:
+  # Build job - builds burst-downloader from specified branch
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      artifact-name: ${{ steps.upload.outputs.artifact-name }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ inputs.branch_ref }}
+
+    - name: Install build dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libzstd-dev zlib1g-dev cmake
+
+    - name: Build burst-downloader
+      run: |
+        mkdir build && cd build
+        cmake -DBUILD_DOWNLOADER=ON -DCMAKE_BUILD_TYPE=Release ..
+        make burst-downloader -j$(nproc)
+
+    - name: Verify binary
+      run: |
+        ./build/burst-downloader --help
+
+    - name: Upload binary artifact
+      id: upload
+      uses: actions/upload-artifact@v4
+      with:
+        name: burst-downloader-${{ inputs.branch_ref }}-${{ github.run_id }}
+        path: build/burst-downloader
+        retention-days: 1
+
+  # Generate test matrix
+  generate-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.generate.outputs.matrix }}
+      instance_types: ${{ steps.generate.outputs.instance_types }}
+
+    steps:
+    - name: Generate test matrix
+      id: generate
+      run: |
+        # Parse instance types and init scripts
+        IFS=',' read -ra INSTANCE_TYPES <<< "${{ inputs.test_instance_types }}"
+        IFS=',' read -ra INIT_SCRIPTS <<< "${{ inputs.test_init_scripts }}"
+
+        # Build matrix JSON
+        MATRIX='{"include":['
+        FIRST=true
+
+        for instance_type in "${INSTANCE_TYPES[@]}"; do
+          for init_script in "${INIT_SCRIPTS[@]}"; do
+            if [ "$FIRST" = true ]; then
+              FIRST=false
+            else
+              MATRIX+=','
+            fi
+            MATRIX+="{\"instance_type\":\"$instance_type\",\"init_script\":\"$init_script\"}"
+          done
+        done
+
+        MATRIX+=']}'
+
+        echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
+        echo "instance_types=$(echo "${INSTANCE_TYPES[*]}" | tr ' ' ',')" >> $GITHUB_OUTPUT
+
+        echo "Generated matrix:"
+        echo "$MATRIX" | jq .
+
+  # Run performance tests - sequential execution with cooldown
+  # Uses max-parallel: 1 to ensure only one instance runs at a time
+  test-execution:
+    needs: [build, generate-matrix]
+    runs-on: ubuntu-latest
+    strategy:
+      max-parallel: 1  # Sequential execution - critical for S3 performance isolation
+      fail-fast: false  # Continue even if one test fails
+      matrix: ${{ fromJson(needs.generate-matrix.outputs.matrix) }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Download binary artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: burst-downloader-${{ inputs.branch_ref }}-${{ github.run_id }}
+        path: ./
+
+    - name: Make binary executable
+      run: chmod +x ./burst-downloader
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-region: us-west-2
+        role-to-assume: arn:aws:iam::339404546440:role/BurstPerformanceTests
+
+    - name: Determine if cooldown needed
+      id: cooldown-check
+      run: |
+        # Check if this is the first job for a new instance type by comparing with previous job
+        # We use a simple heuristic: cooldown after each instance type completes all init scripts
+        CURRENT_INSTANCE="${{ matrix.instance_type }}"
+        CURRENT_INIT="${{ matrix.init_script }}"
+
+        # Get list of init scripts
+        IFS=',' read -ra INIT_SCRIPTS <<< "${{ inputs.test_init_scripts }}"
+        LAST_INIT="${INIT_SCRIPTS[-1]}"
+
+        # Only add cooldown after the last init script for each instance type
+        if [ "$CURRENT_INIT" = "$LAST_INIT" ]; then
+          # Check if this is the last instance type
+          IFS=',' read -ra INSTANCE_TYPES <<< "${{ inputs.test_instance_types }}"
+          LAST_INSTANCE="${INSTANCE_TYPES[-1]}"
+
+          if [ "$CURRENT_INSTANCE" != "$LAST_INSTANCE" ]; then
+            echo "needs_cooldown=true" >> $GITHUB_OUTPUT
+          else
+            echo "needs_cooldown=false" >> $GITHUB_OUTPUT
+          fi
+        else
+          echo "needs_cooldown=false" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Run performance test
+      id: run-test
+      run: |
+        echo "Running performance test for ${{ matrix.instance_type }} with ${{ matrix.init_script }}"
+
+        # Run the orchestration script
+        ./tests/performance/run_perf_test_on_ec2.sh \
+          --instance-type "${{ matrix.instance_type }}" \
+          --init-script "${{ matrix.init_script }}" \
+          --archives "${{ inputs.test_archives }}" \
+          --binary-path ./burst-downloader \
+          --results-prefix "${{ inputs.s3_results_prefix }}"
+
+    - name: Retry on failure
+      if: failure() && steps.run-test.outcome == 'failure'
+      run: |
+        echo "First attempt failed, retrying..."
+        sleep 60
+
+        ./tests/performance/run_perf_test_on_ec2.sh \
+          --instance-type "${{ matrix.instance_type }}" \
+          --init-script "${{ matrix.init_script }}" \
+          --archives "${{ inputs.test_archives }}" \
+          --binary-path ./burst-downloader \
+          --results-prefix "${{ inputs.s3_results_prefix }}"
+
+    - name: Cooldown between instance types
+      if: steps.cooldown-check.outputs.needs_cooldown == 'true'
+      run: |
+        COOLDOWN_SECONDS=$((${{ inputs.cooldown_minutes }} * 60))
+        echo "Starting ${{ inputs.cooldown_minutes }} minute cooldown to avoid S3 performance interference..."
+        echo "Cooldown ends at: $(date -d "+$COOLDOWN_SECONDS seconds" -Iseconds)"
+        sleep $COOLDOWN_SECONDS
+        echo "Cooldown complete"
+
+  # Summary job - runs after all tests complete
+  summary:
+    needs: [test-execution]
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-region: us-west-2
+        role-to-assume: arn:aws:iam::339404546440:role/BurstPerformanceTests
+
+    - name: Download and display all results
+      run: |
+        echo "============================================"
+        echo "Performance Test Results Summary"
+        echo "============================================"
+        echo ""
+        echo "Results prefix: ${{ inputs.s3_results_prefix }}"
+        echo ""
+
+        # List all result files
+        echo "Result files:"
+        aws s3 ls "s3://burst-performance-results/${{ inputs.s3_results_prefix }}/" || echo "No results found"
+
+        echo ""
+        echo "============================================"
+        echo "Individual Results"
+        echo "============================================"
+
+        # Download and display each CSV
+        for csv_file in $(aws s3 ls "s3://burst-performance-results/${{ inputs.s3_results_prefix }}/" | awk '{print $4}'); do
+          echo ""
+          echo "--- $csv_file ---"
+          aws s3 cp "s3://burst-performance-results/${{ inputs.s3_results_prefix }}/$csv_file" - 2>/dev/null || echo "Failed to download"
+        done
+
+    - name: Create summary
+      run: |
+        echo "## Performance Test Results" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "- **Branch/Ref**: ${{ inputs.branch_ref }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Results Prefix**: ${{ inputs.s3_results_prefix }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Instance Types**: ${{ inputs.test_instance_types }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Init Scripts**: ${{ inputs.test_init_scripts }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Archives Tested**: ${{ inputs.test_archives }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "Results are stored in S3 at:" >> $GITHUB_STEP_SUMMARY
+        echo "\`s3://burst-performance-results/${{ inputs.s3_results_prefix }}/\`" >> $GITHUB_STEP_SUMMARY

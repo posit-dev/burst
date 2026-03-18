@@ -200,3 +200,31 @@ GitHub Actions parallelizes tests automatically:
 The slow test matrix is built automatically from CMakeLists.txt labels - no manual maintenance required.
 
 Total: ~15-20 minutes (vs ~25-30 sequential)
+
+## Performance Testing Framework
+
+Located in [tests/performance/](tests/performance/), provides GitHub Actions workflow for benchmarking burst-downloader across EC2 instance types and archive sizes.
+
+- **Test Archives**: S3 bucket `burst-performance-tests` (5 MiB to 50 GiB)
+  - Each archive stored as both `{name}/archive.zip` and `{name}/files/*`
+  - Enables future comparison with non-BURST tools
+- **Results**: S3 bucket `burst-performance-results` (CSV files)
+- **Instance Types**: i7ie.xlarge, i7ie.3xlarge, i7ie.12xlarge, m6id.4xlarge (spot instances)
+- **Workflow**: [.github/workflows/performance-test.yaml](.github/workflows/performance-test.yaml)
+- **Technical Docs**: [tests/performance/README.md](tests/performance/README.md)
+- **User Guide**: [docs/performance-tests.md](docs/performance-tests.md)
+
+### Running Performance Tests
+
+```bash
+# Via GitHub Actions
+gh workflow run performance-test.yaml \
+  -f branch_ref=main \
+  -f s3_results_prefix=perf-$(date +%Y%m%d)
+
+# Create test archives (one-time setup)
+./tests/performance/create_perf_test_archives.sh
+```
+
+**Note**: Uses Ubuntu 24.04 spot instances in us-west-2 with self-termination on completion/error.
+Tests run sequentially with 45-minute cooldowns between instance types to ensure S3 performance isolation.
