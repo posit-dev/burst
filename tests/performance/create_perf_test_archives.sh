@@ -91,7 +91,7 @@ declare -A ARCHIVE_CONFIGS=(
     ["large"]="1073741824:single:1"            # 1 GiB
     ["large-manyfiles"]="1073741824:many:10000"
     ["xlarge"]="10737418240:single:1"          # 10 GiB
-    ["xlarge-manyfiles"]="10737418240:many:25000"
+    ["xlarge-manyfiles"]="10737418240:many:300000"
     ["xxlarge"]="53687091200:single:1"         # 50 GiB
 )
 
