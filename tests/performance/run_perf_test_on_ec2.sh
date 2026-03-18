@@ -218,7 +218,7 @@ TAG_SPECS=$(jq -n \
         {Key:"rs:owner",Value:$rsowner},
         {Key:"rs:environment",Value:$rsenvironment},
         {Key:"rs:project",Value:$rsproject},
-        {Key:"rs:subsystem",Value:$rssubsystem},
+        {Key:"rs:subsystem",Value:$rssubsystem}
     ]}]')
 
 # Launch instance with tags
