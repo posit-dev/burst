@@ -50,7 +50,7 @@ UBUNTU_AMI="ami-0cf2b4e024cdb6960"
 INSTANCE_PROFILE="BurstPerformanceTestInstance"
 
 # Security group (must exist in AWS account, needs outbound HTTPS)
-SECURITY_GROUP="burst-perf-test-sg"
+SECURITY_GROUP="sg-0eb320fecb0f5f036"
 
 # Global variable for cleanup
 INSTANCE_ID=""
@@ -219,19 +219,38 @@ TAG_SPECS=$(jq -n \
         {Key:"rs:subsystem",Value:$rssubsystem}
     ]}]')
 
-# Launch instance with tags
-INSTANCE_ID=$(aws ec2 run-instances \
-    --image-id "$UBUNTU_AMI" \
-    --instance-type "$INSTANCE_TYPE" \
-    --instance-market-options 'MarketType=spot' \
-    --instance-initiated-shutdown-behavior terminate \
-    --iam-instance-profile "Name=$INSTANCE_PROFILE" \
-    --security-groups "$SECURITY_GROUP" \
-    --user-data "$USER_DATA" \
-    --tag-specifications "$TAG_SPECS" \
-    --query 'Instances[0].InstanceId' \
-    --output text \
-    --region "$AWS_REGION")
+# Launch instance with tags, trying each subnet in sequence until one succeeds
+# (no default VPC, so a subnet must be specified; capacity may be unavailable in some AZs)
+SUBNETS=(
+    subnet-027bdf685962a3c0c
+    subnet-007f003bc0b35cbac
+    subnet-0329070a606e9f853
+    subnet-0eae88788590333c9
+)
+INSTANCE_ID=""
+for SUBNET in "${SUBNETS[@]}"; do
+    echo "  Trying subnet $SUBNET..."
+    INSTANCE_ID=$(aws ec2 run-instances \
+        --image-id "$UBUNTU_AMI" \
+        --instance-type "$INSTANCE_TYPE" \
+        --instance-market-options 'MarketType=spot' \
+        --instance-initiated-shutdown-behavior terminate \
+        --iam-instance-profile "Name=$INSTANCE_PROFILE" \
+        --security-group-ids "$SECURITY_GROUP" \
+        --user-data "$USER_DATA" \
+        --tag-specifications "$TAG_SPECS" \
+        --query 'Instances[0].InstanceId' \
+        --output text \
+        --subnet-id "$SUBNET" \
+        --region "$AWS_REGION") && break
+    echo -e "${YELLOW}  Subnet $SUBNET failed, trying next...${NC}"
+    INSTANCE_ID=""
+done
+
+if [ -z "$INSTANCE_ID" ]; then
+    echo -e "${RED}Failed to launch instance in any subnet${NC}"
+    exit 1
+fi
 
 echo -e "${GREEN}Instance launched: $INSTANCE_ID${NC}"
 
