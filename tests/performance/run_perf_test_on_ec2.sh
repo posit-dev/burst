@@ -295,8 +295,9 @@ while true; do
         --parameters 'commands=["test -f /opt/burst-perf/.bootstrap_complete && echo READY || echo WAITING"]' \
         --query 'Command.CommandId' \
         --output text \
-        --region "$AWS_REGION" 2>/dev/null) || {
+        --region "$AWS_REGION" 2>/tmp/send-command-err) || {
         echo "  Waiting for SSM agent... ($ELAPSED s)"
+        cat /tmp/send-command-err
         sleep 10
         continue
     }
