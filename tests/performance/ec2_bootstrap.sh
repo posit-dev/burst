@@ -55,10 +55,10 @@ trap 'error_handler $LINENO' ERR
 
 # Get instance metadata
 echo "Fetching instance metadata..."
-TOKEN=$(curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" 2>/dev/null)
-INSTANCE_ID=$(curl -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null)
-INSTANCE_TYPE=$(curl -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-type 2>/dev/null)
-AVAILABILITY_ZONE=$(curl -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/placement/availability-zone 2>/dev/null)
+TOKEN=$(curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+INSTANCE_ID=$(curl -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id)
+INSTANCE_TYPE=$(curl -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-type)
+AVAILABILITY_ZONE=$(curl -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/placement/availability-zone)
 
 echo "Instance ID: $INSTANCE_ID"
 echo "Instance Type: $INSTANCE_TYPE"
@@ -70,7 +70,7 @@ echo "Fetching instance tags..."
 
 # Wait for IAM role to be available
 for i in {1..30}; do
-    if aws sts get-caller-identity --region us-west-2 >/dev/null 2>&1; then
+    if aws sts get-caller-identity --region us-west-2 >/dev/null; then
         break
     fi
     echo "Waiting for IAM role... ($i/30)"
@@ -80,23 +80,23 @@ done
 # Fetch tags
 BURST_BINARY_S3_PATH=$(aws ec2 describe-tags \
     --filters "Name=resource-id,Values=$INSTANCE_ID" "Name=key,Values=BurstBinaryS3Path" \
-    --query 'Tags[0].Value' --output text --region us-west-2 2>/dev/null || echo "")
+    --query 'Tags[0].Value' --output text --region us-west-2 || echo "")
 
 BURST_SCRIPTS_S3_PATH=$(aws ec2 describe-tags \
     --filters "Name=resource-id,Values=$INSTANCE_ID" "Name=key,Values=BurstScriptsS3Path" \
-    --query 'Tags[0].Value' --output text --region us-west-2 2>/dev/null || echo "")
+    --query 'Tags[0].Value' --output text --region us-west-2 || echo "")
 
 BURST_RESULTS_PREFIX=$(aws ec2 describe-tags \
     --filters "Name=resource-id,Values=$INSTANCE_ID" "Name=key,Values=BurstResultsPrefix" \
-    --query 'Tags[0].Value' --output text --region us-west-2 2>/dev/null || echo "")
+    --query 'Tags[0].Value' --output text --region us-west-2 || echo "")
 
 BURST_INIT_SCRIPT=$(aws ec2 describe-tags \
     --filters "Name=resource-id,Values=$INSTANCE_ID" "Name=key,Values=BurstInitScript" \
-    --query 'Tags[0].Value' --output text --region us-west-2 2>/dev/null || echo "")
+    --query 'Tags[0].Value' --output text --region us-west-2 || echo "")
 
 BURST_TEST_ARCHIVES=$(aws ec2 describe-tags \
     --filters "Name=resource-id,Values=$INSTANCE_ID" "Name=key,Values=BurstTestArchives" \
-    --query 'Tags[0].Value' --output text --region us-west-2 2>/dev/null || echo "")
+    --query 'Tags[0].Value' --output text --region us-west-2 || echo "")
 
 echo "Binary S3 Path: $BURST_BINARY_S3_PATH"
 echo "Scripts S3 Path: $BURST_SCRIPTS_S3_PATH"
@@ -146,7 +146,7 @@ chmod +x "$PERF_DIR/bin/burst-downloader"
 echo "Binary downloaded: $PERF_DIR/bin/burst-downloader"
 
 # Verify binary works
-if ! "$PERF_DIR/bin/burst-downloader" --help >/dev/null 2>&1; then
+if ! "$PERF_DIR/bin/burst-downloader" --help >/dev/null; then
     echo "ERROR: burst-downloader binary verification failed"
     exit 1
 fi
@@ -158,8 +158,8 @@ echo "Downloading test scripts..."
 aws s3 cp "$BURST_SCRIPTS_S3_PATH" "$PERF_DIR/scripts/scripts.tar.gz" --region us-west-2
 tar -xzf "$PERF_DIR/scripts/scripts.tar.gz" -C "$PERF_DIR/scripts/"
 rm "$PERF_DIR/scripts/scripts.tar.gz"
-chmod +x "$PERF_DIR/scripts/"*.sh 2>/dev/null || true
-chmod +x "$PERF_DIR/scripts/init_scripts/"*.sh 2>/dev/null || true
+chmod +x "$PERF_DIR/scripts/"*.sh || true
+chmod +x "$PERF_DIR/scripts/init_scripts/"*.sh || true
 echo "Scripts downloaded to $PERF_DIR/scripts/"
 
 # Save configuration for test runner
