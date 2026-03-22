@@ -237,6 +237,7 @@ for SUBNET in "${SUBNETS[@]}"; do
         --instance-initiated-shutdown-behavior terminate \
         --iam-instance-profile "Name=$INSTANCE_PROFILE" \
         --security-group-ids "$SECURITY_GROUP" \
+        --metadata-options 'HttpTokens=required,HttpPutResponseHopLimit=2,InstanceMetadataTags=enabled' \
         --user-data "$USER_DATA" \
         --tag-specifications "$TAG_SPECS" \
         --query 'Instances[0].InstanceId' \

@@ -64,39 +64,16 @@ echo "Instance ID: $INSTANCE_ID"
 echo "Instance Type: $INSTANCE_TYPE"
 echo "Availability Zone: $AVAILABILITY_ZONE"
 
-# Get configuration from instance tags
+# Get configuration from instance tags via IMDS (no AWS CLI needed)
 echo ""
 echo "Fetching instance tags..."
+IMDS_TAGS="http://169.254.169.254/latest/meta-data/tags/instance"
 
-# Wait for IAM role to be available
-for i in {1..30}; do
-    if aws sts get-caller-identity --region us-west-2 >/dev/null; then
-        break
-    fi
-    echo "Waiting for IAM role... ($i/30)"
-    sleep 2
-done
-
-# Fetch tags
-BURST_BINARY_S3_PATH=$(aws ec2 describe-tags \
-    --filters "Name=resource-id,Values=$INSTANCE_ID" "Name=key,Values=BurstBinaryS3Path" \
-    --query 'Tags[0].Value' --output text --region us-west-2 || echo "")
-
-BURST_SCRIPTS_S3_PATH=$(aws ec2 describe-tags \
-    --filters "Name=resource-id,Values=$INSTANCE_ID" "Name=key,Values=BurstScriptsS3Path" \
-    --query 'Tags[0].Value' --output text --region us-west-2 || echo "")
-
-BURST_RESULTS_PREFIX=$(aws ec2 describe-tags \
-    --filters "Name=resource-id,Values=$INSTANCE_ID" "Name=key,Values=BurstResultsPrefix" \
-    --query 'Tags[0].Value' --output text --region us-west-2 || echo "")
-
-BURST_INIT_SCRIPT=$(aws ec2 describe-tags \
-    --filters "Name=resource-id,Values=$INSTANCE_ID" "Name=key,Values=BurstInitScript" \
-    --query 'Tags[0].Value' --output text --region us-west-2 || echo "")
-
-BURST_TEST_ARCHIVES=$(aws ec2 describe-tags \
-    --filters "Name=resource-id,Values=$INSTANCE_ID" "Name=key,Values=BurstTestArchives" \
-    --query 'Tags[0].Value' --output text --region us-west-2 || echo "")
+BURST_BINARY_S3_PATH=$(curl -sf -H "X-aws-ec2-metadata-token: $TOKEN" "$IMDS_TAGS/BurstBinaryS3Path" || echo "")
+BURST_SCRIPTS_S3_PATH=$(curl -sf -H "X-aws-ec2-metadata-token: $TOKEN" "$IMDS_TAGS/BurstScriptsS3Path" || echo "")
+BURST_RESULTS_PREFIX=$(curl -sf -H "X-aws-ec2-metadata-token: $TOKEN" "$IMDS_TAGS/BurstResultsPrefix" || echo "")
+BURST_INIT_SCRIPT=$(curl -sf -H "X-aws-ec2-metadata-token: $TOKEN" "$IMDS_TAGS/BurstInitScript" || echo "")
+BURST_TEST_ARCHIVES=$(curl -sf -H "X-aws-ec2-metadata-token: $TOKEN" "$IMDS_TAGS/BurstTestArchives" || echo "")
 
 echo "Binary S3 Path: $BURST_BINARY_S3_PATH"
 echo "Scripts S3 Path: $BURST_SCRIPTS_S3_PATH"
@@ -137,6 +114,17 @@ echo ""
 echo "Creating directory structure..."
 sudo mkdir -p "$PERF_DIR"/{bin,scripts,results,output}
 sudo chown -R ubuntu:ubuntu "$PERF_DIR"
+
+# Wait for IAM role to be available before S3 operations
+echo ""
+echo "Waiting for IAM role..."
+for i in {1..30}; do
+    if aws sts get-caller-identity --region us-west-2 >/dev/null; then
+        break
+    fi
+    echo "Waiting for IAM role... ($i/30)"
+    sleep 2
+done
 
 # Download burst-downloader binary
 echo ""
