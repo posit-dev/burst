@@ -143,10 +143,11 @@ sudo apt-get update -qq
 # Install required packages
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
     libzstd1 \
-    awscli \
     time \
     btrfs-progs \
     jq
+
+sudo snap install  aws-cli --classic
 
 echo "Dependencies installed successfully"
 
