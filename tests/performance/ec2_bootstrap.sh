@@ -137,6 +137,14 @@ fi
 echo ""
 echo "Installing dependencies..."
 
+# Wait for any apt/dpkg operations already in progress (e.g. unattended-upgrades on startup)
+echo "Waiting for apt lock..."
+while sudo fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 \
+    || sudo fuser /var/lib/apt/lists/lock >/dev/null 2>&1; do
+    sleep 2
+done
+echo "Apt lock acquired"
+
 # Update package list
 sudo apt-get update -qq
 
