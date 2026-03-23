@@ -37,7 +37,7 @@ echo "=========================================="
 # Error handler - shutdown on failure
 error_handler() {
     local exit_code=$?
-    local line_number=$1
+    local line_number=$1``
     echo ""
     echo "ERROR: Bootstrap failed at line $line_number with exit code $exit_code"
     echo "Initiating instance shutdown..."
@@ -48,7 +48,7 @@ error_handler() {
     sleep 5
 
     # Shutdown the instance (will terminate due to instance-initiated-shutdown-behavior)
-    sudo shutdown -h now
+    # sudo shutdown -h now
 }
 
 trap 'error_handler $LINENO' ERR

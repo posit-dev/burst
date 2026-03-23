@@ -49,8 +49,8 @@ error_handler() {
     sleep 5
 
     # Shutdown the instance
-    #echo "Initiating instance shutdown..."
-    #sudo shutdown -h now
+    echo "Initiating instance shutdown..."
+    # sudo shutdown -h now
 }
 
 trap 'error_handler $LINENO' ERR
@@ -233,7 +233,6 @@ if aws s3 cp "$CSV_FILE" "$S3_RESULTS_PATH" --region us-west-2; then
     echo "Results uploaded successfully"
 else
     echo "ERROR: Failed to upload results"
-    sleep 240 # Time for operator to view log on instance locally
     exit 1
 fi
 
@@ -250,4 +249,4 @@ sleep 5
 # Shutdown the instance
 echo ""
 echo "Initiating instance shutdown..."
-sudo shutdown -h now
+# sudo shutdown -h now
