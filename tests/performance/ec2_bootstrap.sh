@@ -64,6 +64,47 @@ echo "Instance ID: $INSTANCE_ID"
 echo "Instance Type: $INSTANCE_TYPE"
 echo "Availability Zone: $AVAILABILITY_ZONE"
 
+# Install CloudWatch Logs agent early so logs are available remotely even on fast failure
+echo ""
+echo "Installing CloudWatch Logs agent..."
+if curl -sf -o /tmp/amazon-cloudwatch-agent.deb \
+        "https://s3.amazonaws.com/amazoncloudwatch-agent/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb"; then
+    sudo dpkg -i -E /tmp/amazon-cloudwatch-agent.deb
+    rm /tmp/amazon-cloudwatch-agent.deb
+
+    sudo tee /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json > /dev/null << 'CWAGENT'
+{
+    "logs": {
+        "logs_collected": {
+            "files": {
+                "collect_list": [
+                    {
+                        "file_path": "/var/log/burst-perf-bootstrap.log",
+                        "log_group_name": "/burst/perf-tests",
+                        "log_stream_name": "{instance_id}/bootstrap",
+                        "retention_in_days": 14
+                    },
+                    {
+                        "file_path": "/var/log/burst-perf-tests.log",
+                        "log_group_name": "/burst/perf-tests",
+                        "log_stream_name": "{instance_id}/tests",
+                        "retention_in_days": 14
+                    }
+                ]
+            }
+        }
+    }
+}
+CWAGENT
+
+    sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
+        -a fetch-config -m ec2 -s \
+        -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
+    echo "CloudWatch Logs agent started - logs streaming to log group /burst/perf-tests, streams ${INSTANCE_ID}/bootstrap and ${INSTANCE_ID}/tests"
+else
+    echo "WARNING: Failed to download CloudWatch Logs agent - logs will not be available remotely"
+fi
+
 # Get configuration from instance tags via IMDS (no AWS CLI needed)
 echo ""
 echo "Fetching instance tags..."
