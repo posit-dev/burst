@@ -49,8 +49,8 @@ error_handler() {
     sleep 5
 
     # Shutdown the instance
-    echo "Initiating instance shutdown..."
-    sudo shutdown -h now
+    #echo "Initiating instance shutdown..."
+    #sudo shutdown -h now
 }
 
 trap 'error_handler $LINENO' ERR
