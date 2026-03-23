@@ -137,19 +137,13 @@ fi
 echo ""
 echo "Installing dependencies..."
 
-# Wait for any apt/dpkg operations already in progress (e.g. unattended-upgrades on startup)
-echo "Waiting for apt lock..."
-while sudo fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 \
-    || sudo fuser /var/lib/apt/lists/lock >/dev/null 2>&1; do
-    sleep 2
-done
-echo "Apt lock acquired"
-
 # Update package list
-sudo apt-get update -qq
+# DPkg::Lock::Timeout tells apt to wait up to 5 minutes for the lock rather than failing
+# immediately (unattended-upgrades commonly holds it on instance startup)
+sudo apt-get -o DPkg::Lock::Timeout=300 update -qq
 
 # Install required packages
-sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+sudo DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=300 install -y -qq \
     libzstd1 \
     time \
     btrfs-progs \
