@@ -18,7 +18,7 @@ jobs:
       slow-tests: ${{ steps.list-slow-tests.outputs.matrix }}
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v7
 
     - name: Install dependencies
       run: |
@@ -27,10 +27,11 @@ jobs:
 
     - name: Install 7-Zip with Zstandard support
       run: |
-        # Download official 7-Zip from 7-zip.org (includes Zstandard codec)
+        # Official 7-Zip build (includes Zstandard codec); 7-zip.org links its downloads to these GitHub releases
         # Note: Ubuntu/Debian's p7zip-full package strips Zstandard for DFSG compliance
-        wget https://www.7-zip.org/a/7z2408-linux-x64.tar.xz
-        tar -xf 7z2408-linux-x64.tar.xz
+        wget https://github.com/ip7z/7zip/releases/download/26.06/7z2606-linux-x64.tar.xz
+        echo "2b539cf067b2ad48e1baa5093dbaa8818b73542d1222a0ffde9dc5f2922ea62e  7z2606-linux-x64.tar.xz" | sha256sum -c
+        tar -xf 7z2606-linux-x64.tar.xz
         sudo cp 7zz /usr/local/bin/
         sudo chmod +x /usr/local/bin/7zz
         7zz --help | head -2
@@ -56,7 +57,7 @@ jobs:
       run: make test-unit
 
     - name: Upload build for integration and E2E tests
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: burst-binaries
         path: |
@@ -73,7 +74,7 @@ jobs:
     needs: build-and-unit-tests
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v7
 
     - name: Install dependencies
       run: |
@@ -83,16 +84,17 @@ jobs:
 
     - name: Install 7-Zip with Zstandard support
       run: |
-        # Download official 7-Zip from 7-zip.org (includes Zstandard codec)
+        # Official 7-Zip build (includes Zstandard codec); 7-zip.org links its downloads to these GitHub releases
         # Note: Ubuntu/Debian's p7zip-full package strips Zstandard for DFSG compliance
-        wget https://www.7-zip.org/a/7z2408-linux-x64.tar.xz
-        tar -xf 7z2408-linux-x64.tar.xz
+        wget https://github.com/ip7z/7zip/releases/download/26.06/7z2606-linux-x64.tar.xz
+        echo "2b539cf067b2ad48e1baa5093dbaa8818b73542d1222a0ffde9dc5f2922ea62e  7z2606-linux-x64.tar.xz" | sha256sum -c
+        tar -xf 7z2606-linux-x64.tar.xz
         sudo cp 7zz /usr/local/bin/
         sudo chmod +x /usr/local/bin/7zz
         7zz --help | head -2
 
     - name: Download binaries
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         name: burst-binaries
         path: build/
@@ -101,7 +103,7 @@ jobs:
       run: chmod +x build/burst-* build/tests/test_*
     
     - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v4
+      uses: aws-actions/configure-aws-credentials@v6
       with:
         aws-region: us-east-1
         role-to-assume: arn:aws:iam::339404546440:role/BurstGithubTests
@@ -122,17 +124,18 @@ jobs:
         test: ${{ fromJson(needs.build-and-unit-tests.outputs.slow-tests) }}
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v7
 
     - name: Install 7-Zip with Zstandard support
       run: |
-        wget https://www.7-zip.org/a/7z2408-linux-x64.tar.xz
-        tar -xf 7z2408-linux-x64.tar.xz
+        wget https://github.com/ip7z/7zip/releases/download/26.06/7z2606-linux-x64.tar.xz
+        echo "2b539cf067b2ad48e1baa5093dbaa8818b73542d1222a0ffde9dc5f2922ea62e  7z2606-linux-x64.tar.xz" | sha256sum -c
+        tar -xf 7z2606-linux-x64.tar.xz
         sudo cp 7zz /usr/local/bin/
         sudo chmod +x /usr/local/bin/7zz
 
     - name: Download binaries
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         name: burst-binaries
         path: build/
@@ -141,7 +144,7 @@ jobs:
       run: chmod +x build/burst-* build/tests/test_*
 
     - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v4
+      uses: aws-actions/configure-aws-credentials@v6
       with:
         aws-region: us-east-1
         role-to-assume: arn:aws:iam::339404546440:role/BurstGithubTests

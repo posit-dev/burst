@@ -111,10 +111,13 @@ if(BUILD_DOWNLOADER)
 
     set(AWS_INSTALL_DIR ${CMAKE_BINARY_DIR}/aws-crt-install)
 
+    # These tags are the set aws-crt-cpp v0.44.5 ships together; bump them as a set,
+    # since the libraries are only tested against each other at matching versions.
+
     # Build aws-c-common first (base library)
     ExternalProject_Add(aws-c-common-ext
         GIT_REPOSITORY https://github.com/awslabs/aws-c-common.git
-        GIT_TAG main
+        GIT_TAG v1.0.5
         CMAKE_ARGS ${AWS_CRT_BUILD_ARGS}
         INSTALL_DIR ${AWS_INSTALL_DIR}
     )
@@ -123,7 +126,7 @@ if(BUILD_DOWNLOADER)
     ExternalProject_Add(s2n-ext
         DEPENDS aws-c-common-ext
         GIT_REPOSITORY https://github.com/aws/s2n-tls.git
-        GIT_TAG main
+        GIT_TAG v1.7.13
         CMAKE_ARGS ${AWS_CRT_BUILD_ARGS} -DCMAKE_PREFIX_PATH=${AWS_INSTALL_DIR}
         INSTALL_DIR ${AWS_INSTALL_DIR}
     )
@@ -132,7 +135,7 @@ if(BUILD_DOWNLOADER)
     ExternalProject_Add(aws-c-sdkutils-ext
         DEPENDS aws-c-common-ext
         GIT_REPOSITORY https://github.com/awslabs/aws-c-sdkutils.git
-        GIT_TAG main
+        GIT_TAG v1.0.1
         CMAKE_ARGS ${AWS_CRT_BUILD_ARGS} -DCMAKE_PREFIX_PATH=${AWS_INSTALL_DIR}
         INSTALL_DIR ${AWS_INSTALL_DIR}
     )
@@ -141,7 +144,7 @@ if(BUILD_DOWNLOADER)
     ExternalProject_Add(aws-checksums-ext
         DEPENDS aws-c-common-ext
         GIT_REPOSITORY https://github.com/awslabs/aws-checksums.git
-        GIT_TAG main
+        GIT_TAG v1.0.1
         CMAKE_ARGS ${AWS_CRT_BUILD_ARGS} -DCMAKE_PREFIX_PATH=${AWS_INSTALL_DIR}
         INSTALL_DIR ${AWS_INSTALL_DIR}
     )
@@ -150,7 +153,7 @@ if(BUILD_DOWNLOADER)
     ExternalProject_Add(aws-c-cal-ext
         DEPENDS aws-c-common-ext
         GIT_REPOSITORY https://github.com/awslabs/aws-c-cal.git
-        GIT_TAG main
+        GIT_TAG v1.0.0
         CMAKE_ARGS ${AWS_CRT_BUILD_ARGS} -DCMAKE_PREFIX_PATH=${AWS_INSTALL_DIR}
         INSTALL_DIR ${AWS_INSTALL_DIR}
     )
@@ -159,7 +162,7 @@ if(BUILD_DOWNLOADER)
     ExternalProject_Add(aws-c-io-ext
         DEPENDS aws-c-common-ext aws-c-cal-ext s2n-ext
         GIT_REPOSITORY https://github.com/awslabs/aws-c-io.git
-        GIT_TAG main
+        GIT_TAG v1.1.2
         CMAKE_ARGS ${AWS_CRT_BUILD_ARGS} -DCMAKE_PREFIX_PATH=${AWS_INSTALL_DIR}
         INSTALL_DIR ${AWS_INSTALL_DIR}
     )
@@ -168,7 +171,7 @@ if(BUILD_DOWNLOADER)
     ExternalProject_Add(aws-c-compression-ext
         DEPENDS aws-c-common-ext
         GIT_REPOSITORY https://github.com/awslabs/aws-c-compression.git
-        GIT_TAG main
+        GIT_TAG v1.0.0
         CMAKE_ARGS ${AWS_CRT_BUILD_ARGS} -DCMAKE_PREFIX_PATH=${AWS_INSTALL_DIR}
         INSTALL_DIR ${AWS_INSTALL_DIR}
     )
@@ -177,7 +180,7 @@ if(BUILD_DOWNLOADER)
     ExternalProject_Add(aws-c-http-ext
         DEPENDS aws-c-io-ext aws-c-compression-ext
         GIT_REPOSITORY https://github.com/awslabs/aws-c-http.git
-        GIT_TAG main
+        GIT_TAG v1.3.0
         CMAKE_ARGS ${AWS_CRT_BUILD_ARGS} -DCMAKE_PREFIX_PATH=${AWS_INSTALL_DIR}
         INSTALL_DIR ${AWS_INSTALL_DIR}
     )
@@ -186,7 +189,7 @@ if(BUILD_DOWNLOADER)
     ExternalProject_Add(aws-c-auth-ext
         DEPENDS aws-c-http-ext aws-c-cal-ext aws-c-io-ext aws-c-sdkutils-ext
         GIT_REPOSITORY https://github.com/awslabs/aws-c-auth.git
-        GIT_TAG main
+        GIT_TAG v1.1.0
         CMAKE_ARGS ${AWS_CRT_BUILD_ARGS} -DCMAKE_PREFIX_PATH=${AWS_INSTALL_DIR}
         INSTALL_DIR ${AWS_INSTALL_DIR}
     )
@@ -195,7 +198,7 @@ if(BUILD_DOWNLOADER)
     ExternalProject_Add(aws-c-s3-ext
         DEPENDS aws-c-auth-ext aws-c-http-ext aws-c-io-ext aws-c-compression-ext aws-c-cal-ext aws-checksums-ext aws-c-sdkutils-ext
         GIT_REPOSITORY https://github.com/awslabs/aws-c-s3.git
-        GIT_TAG main
+        GIT_TAG v1.5.2
         CMAKE_ARGS ${AWS_CRT_BUILD_ARGS} -DCMAKE_PREFIX_PATH=${AWS_INSTALL_DIR}
         INSTALL_DIR ${AWS_INSTALL_DIR}
     )
