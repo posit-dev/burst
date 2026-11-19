@@ -27,10 +27,11 @@ jobs:
 
     - name: Install 7-Zip with Zstandard support
       run: |
-        # Download official 7-Zip from 7-zip.org (includes Zstandard codec)
+        # Official 7-Zip build (includes Zstandard codec); 7-zip.org links its downloads to these GitHub releases
         # Note: Ubuntu/Debian's p7zip-full package strips Zstandard for DFSG compliance
-        wget https://www.7-zip.org/a/7z2408-linux-x64.tar.xz
-        tar -xf 7z2408-linux-x64.tar.xz
+        wget https://github.com/ip7z/7zip/releases/download/26.06/7z2606-linux-x64.tar.xz
+        echo "2b539cf067b2ad48e1baa5093dbaa8818b73542d1222a0ffde9dc5f2922ea62e  7z2606-linux-x64.tar.xz" | sha256sum -c
+        tar -xf 7z2606-linux-x64.tar.xz
         sudo cp 7zz /usr/local/bin/
         sudo chmod +x /usr/local/bin/7zz
         7zz --help | head -2
@@ -83,10 +84,11 @@ jobs:
 
     - name: Install 7-Zip with Zstandard support
       run: |
-        # Download official 7-Zip from 7-zip.org (includes Zstandard codec)
+        # Official 7-Zip build (includes Zstandard codec); 7-zip.org links its downloads to these GitHub releases
         # Note: Ubuntu/Debian's p7zip-full package strips Zstandard for DFSG compliance
-        wget https://www.7-zip.org/a/7z2408-linux-x64.tar.xz
-        tar -xf 7z2408-linux-x64.tar.xz
+        wget https://github.com/ip7z/7zip/releases/download/26.06/7z2606-linux-x64.tar.xz
+        echo "2b539cf067b2ad48e1baa5093dbaa8818b73542d1222a0ffde9dc5f2922ea62e  7z2606-linux-x64.tar.xz" | sha256sum -c
+        tar -xf 7z2606-linux-x64.tar.xz
         sudo cp 7zz /usr/local/bin/
         sudo chmod +x /usr/local/bin/7zz
         7zz --help | head -2
@@ -126,8 +128,9 @@ jobs:
 
     - name: Install 7-Zip with Zstandard support
       run: |
-        wget https://www.7-zip.org/a/7z2408-linux-x64.tar.xz
-        tar -xf 7z2408-linux-x64.tar.xz
+        wget https://github.com/ip7z/7zip/releases/download/26.06/7z2606-linux-x64.tar.xz
+        echo "2b539cf067b2ad48e1baa5093dbaa8818b73542d1222a0ffde9dc5f2922ea62e  7z2606-linux-x64.tar.xz" | sha256sum -c
+        tar -xf 7z2606-linux-x64.tar.xz
         sudo cp 7zz /usr/local/bin/
         sudo chmod +x /usr/local/bin/7zz
 
