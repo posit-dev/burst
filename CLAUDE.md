@@ -63,7 +63,7 @@ int main(void) {
 
 ## Mocking Framework
 
-The project uses **CMock v2.5.3** for creating mock objects:
+The project uses **CMock v2.7.0** for creating mock objects:
 
 - Fetched via CMake FetchContent from GitHub
 - Built as static library (`libcmock.a`)

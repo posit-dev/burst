@@ -10,7 +10,7 @@ include(FetchContent)
 FetchContent_Declare(
     cmock
     GIT_REPOSITORY https://github.com/ThrowTheSwitch/CMock.git
-    GIT_TAG v2.5.3
+    GIT_TAG v2.7.0
 )
 FetchContent_MakeAvailable(cmock)
 
