@@ -79,7 +79,7 @@ The project uses **CMock v2.5.3** for creating mock objects:
 
 ### Mock Generation Process
 
-1. Mock headers defined in [tests/mocks/](tests/mocks/) (e.g., `compression_mock.h`)
+1. Mock headers defined in [tests/mocks/](tests/mocks/) (`compression_mock.h`, `zstd_mock.h`, `burst_writer_mock.h`, `btrfs_writer_mock.h`)
 2. CMake/Ruby generates `Mock_*.c` and `Mock_*.h` at build time
 3. Generated files placed in `build/tests/mocks/`
 
@@ -110,31 +110,37 @@ tests/
 ├── cmock_config.yml         # CMock configuration
 ├── unity/                   # Unity framework source
 ├── mocks/                   # Mock header definitions
+│   ├── btrfs_writer_mock.h
+│   ├── burst_writer_mock.h
 │   ├── compression_mock.h
 │   └── zstd_mock.h
-├── unit/                    # Unit test files
-│   ├── test_zip_structures.c
-│   ├── test_writer_core.c
-│   ├── test_crc32.c
-│   ├── test_zstd_frames.c
-│   ├── test_alignment.c
-│   └── test_writer_chunking.c  (uses mocks)
-├── integration/             # Integration test scripts
-│   ├── test_writer_basic.sh
-│   ├── test_zip_compatibility.sh
-│   └── test_zstd_compression.sh
+├── unit/                    # Unit test files (writer and downloader)
+├── integration/             # Integration test scripts and C integration tests
+│   └── e2e/                 # End-to-end S3 + BTRFS tests
+├── performance/             # EC2 performance test harness
 └── fixtures/                # Test data files
 ```
 
 ### Test Categories
 
-**Unit Tests** (6 tests in [tests/unit/](tests/unit/)):
+**Unit Tests** (13 tests in [tests/unit/](tests/unit/)):
+
+Writer:
 - `test_zip_structures` - ZIP header structures and DOS datetime conversion
 - `test_writer_core` - Core writer functionality
+- `test_writer_helpers` - Static helpers in `burst_writer.c` (includes the source directly)
 - `test_crc32` - CRC32 calculation
 - `test_zstd_frames` - Zstandard frame handling
 - `test_alignment` - 8 MiB boundary alignment logic
 - `test_writer_chunking` - 128 KiB chunking with mocked compression
+- `test_entry_processor` - Error paths in `entry_processor.c`, with mocked `burst_writer_*`
+
+Downloader:
+- `test_central_dir_parser` - Central directory parsing from hand-built ZIP bytes
+- `test_cd_fetch` - Central directory fetch utilities
+- `test_frame_parser` - Parsing of ZIP headers, Zstandard frames and BURST padding/start-of-part frames
+- `test_stream_processor` - Stream processing, with mocked BTRFS writer
+- `test_parts_calculation` - Whether the final part is downloaded from S3 or taken from the CD buffer
 
 **Integration Tests** (Any .sh script in [tests/integration/](tests/integration/)):
 - `test_writer_basic.sh` - Basic ZIP creation and extraction validation
@@ -164,9 +170,9 @@ test, this file must always be updated to include it.
 ```bash
 # Via Makefile (recommended)
 make test                         # All tests (~20-25min)
-make test-unit                    # Unit tests (11 tests, ~5s)
-make test-integration             # Fast integration (14 tests, ~3-5min with 4 parallel jobs)
-make test-slow                    # Slow E2E tests (5 tests, ~5-8min with 4 parallel jobs)
+make test-unit                    # Non-integration tests (14 tests, ~5s)
+make test-integration             # Fast integration (12 tests, ~3-5min with 4 parallel jobs)
+make test-slow                    # Slow tests, mostly E2E (5 tests, ~5-8min with 4 parallel jobs)
 
 # Control parallelism
 CTEST_PARALLEL_LEVEL=8 make test-integration  # Use 8 parallel jobs
@@ -185,10 +191,10 @@ bash ../../tests/integration/test_writer_basic.sh  # Run integration test
 ```
 
 ### Test Labels
-- `integration` - Non-unit tests (14 tests)
-- `s3` - Requires S3 access (7 tests)
-- `e2e` - End-to-end tests (5 tests)
-- `btrfs` - Requires BTRFS filesystem (5 tests)
+- `integration` - Non-unit tests (17 tests)
+- `s3` - Requires S3 access (10 tests)
+- `e2e` - End-to-end tests (7 tests)
+- `btrfs` - Requires BTRFS filesystem (7 tests)
 - `slow` - Tests with 300s+ timeout (5 tests) - automatically parallelized in CI
 - `sudo` - Requires sudo privileges (1 test)
 
