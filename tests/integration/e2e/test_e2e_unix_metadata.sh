@@ -239,7 +239,12 @@ echo "Step 5: Downloading and extracting with burst-downloader (sudo)..."
 EXTRACT_DIR="$BTRFS_MOUNT_DIR/extracted_$TEST_ID"
 sudo mkdir -p "$EXTRACT_DIR"
 
-sudo -E "$BURST_DOWNLOADER" \
+# sudo-rs (Ubuntu 26.04+) ignores a bare -E, so list the variables the AWS credential chain reads.
+# The config file paths are set explicitly because root's HOME is not the invoking user's.
+AWS_CONFIG_FILE="${AWS_CONFIG_FILE:-$HOME/.aws/config}" \
+AWS_SHARED_CREDENTIALS_FILE="${AWS_SHARED_CREDENTIALS_FILE:-$HOME/.aws/credentials}" \
+sudo --preserve-env=AWS_ACCESS_KEY_ID,AWS_SECRET_ACCESS_KEY,AWS_SESSION_TOKEN,AWS_PROFILE,AWS_REGION,AWS_DEFAULT_REGION,AWS_CONFIG_FILE,AWS_SHARED_CREDENTIALS_FILE \
+    "$BURST_DOWNLOADER" \
     --bucket "$BURST_TEST_BUCKET" \
     --key "$S3_KEY" \
     --region "$AWS_REGION" \
