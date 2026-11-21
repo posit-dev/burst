@@ -155,6 +155,7 @@ mkdir -p "$EXTRACT_DIR"
     --bucket "$BURST_TEST_BUCKET" \
     --key "$S3_KEY" \
     --region "$AWS_REGION" \
+    ${BURST_TEST_ENDPOINT:+--endpoint "$BURST_TEST_ENDPOINT"} \
     --output-dir "$EXTRACT_DIR"
 echo -e "${GREEN}✓${NC} Downloaded and extracted"
 

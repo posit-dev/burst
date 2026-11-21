@@ -6,6 +6,8 @@
 #include "profiling.h"
 
 #include <aws/common/allocator.h>
+#include <aws/common/uri.h>
+#include <aws/common/error.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -27,6 +29,7 @@ static void print_usage(const char *program_name) {
     printf("  -s, --part-size NUM       Part size in MiB (8-64, must be multiple of 8,\n");
     printf("                            default: 8)\n");
     printf("  -p, --profile PROFILE     AWS profile name (default: AWS_PROFILE env or 'default')\n");
+    printf("  -e, --endpoint URL        S3 endpoint override, e.g. http://localhost:4566 (path-style)\n");
     printf("  -h, --help                Show this help message\n");
     printf("\nAWS Credentials:\n");
     printf("  Uses standard AWS credential chain:\n");
@@ -86,6 +89,23 @@ struct burst_downloader *burst_downloader_create(
     return downloader;
 }
 
+int burst_downloader_set_endpoint(struct burst_downloader *downloader, const char *url) {
+    struct aws_uri *uri = calloc(1, sizeof(struct aws_uri));
+    if (!uri) {
+        fprintf(stderr, "Error: Failed to allocate endpoint\n");
+        return -1;
+    }
+    struct aws_byte_cursor url_cursor = aws_byte_cursor_from_c_str(url);
+    if (aws_uri_init_parse(uri, downloader->allocator, &url_cursor) != AWS_OP_SUCCESS) {
+        fprintf(stderr, "Error: Invalid endpoint URL %s: %s\n", url, aws_error_debug_str(aws_last_error()));
+        free(uri);
+        return -1;
+    }
+    downloader->endpoint = uri;
+    printf("Endpoint:    %s\n", url);
+    return 0;
+}
+
 void burst_downloader_destroy(struct burst_downloader *downloader) {
     if (!downloader) {
         return;
@@ -93,6 +113,11 @@ void burst_downloader_destroy(struct burst_downloader *downloader) {
 
     // Clean up S3 client first
     s3_client_cleanup(downloader);
+
+    if (downloader->endpoint) {
+        aws_uri_clean_up(downloader->endpoint);
+        free(downloader->endpoint);
+    }
 
     // Free allocated strings
     free(downloader->bucket);
@@ -430,6 +455,7 @@ int main(int argc, char **argv) {
     const char *region = NULL;
     const char *output_dir = NULL;
     const char *profile = NULL;
+    const char *endpoint = NULL;
     size_t max_connections = 0;
     size_t max_concurrent_parts = 8;
     uint64_t part_size = 8 * 1024 * 1024;  // Default 8 MiB
@@ -444,12 +470,13 @@ int main(int argc, char **argv) {
         {"max-concurrent-parts", required_argument, 0, 'n'},
         {"part-size", required_argument, 0, 's'},
         {"profile", required_argument, 0, 'p'},
+        {"endpoint", required_argument, 0, 'e'},
         {"help", no_argument, 0, 'h'},
         {0, 0, 0, 0}
     };
 
     int opt;
-    while ((opt = getopt_long(argc, argv, "b:k:r:o:c:n:s:p:h", long_options, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "b:k:r:o:c:n:s:p:e:h", long_options, NULL)) != -1) {
         switch (opt) {
             case 'b':
                 bucket = optarg;
@@ -488,6 +515,9 @@ int main(int argc, char **argv) {
             }
             case 'p':
                 profile = optarg;
+                break;
+            case 'e':
+                endpoint = optarg;
                 break;
             case 'h':
                 print_usage(argv[0]);
@@ -530,6 +560,11 @@ int main(int argc, char **argv) {
 
     if (!downloader) {
         fprintf(stderr, "Error: Failed to create downloader\n");
+        return 1;
+    }
+
+    if (endpoint && burst_downloader_set_endpoint(downloader, endpoint) != 0) {
+        burst_downloader_destroy(downloader);
         return 1;
     }
 

@@ -45,6 +45,37 @@ struct get_request_context {
 };
 
 // Initialize request context
+
+// With an endpoint override, aws-c-s3 sets Host from the override and rejects any other Host value,
+// so the bucket goes in the path instead of the hostname.
+void s3_set_request_target(struct burst_downloader *downloader,
+                           struct aws_http_message *message,
+                           struct aws_byte_buf *path_buf) {
+    aws_byte_buf_init(path_buf, downloader->allocator,
+                      strlen(downloader->bucket) + strlen(downloader->key) + 3);
+    aws_byte_buf_append_byte_dynamic(path_buf, '/');
+    if (downloader->endpoint) {
+        struct aws_byte_cursor bucket_cursor = aws_byte_cursor_from_c_str(downloader->bucket);
+        aws_byte_buf_append_dynamic(path_buf, &bucket_cursor);
+        aws_byte_buf_append_byte_dynamic(path_buf, '/');
+    }
+    struct aws_byte_cursor key_cursor = aws_byte_cursor_from_c_str(downloader->key);
+    aws_byte_buf_append_dynamic(path_buf, &key_cursor);
+    aws_http_message_set_request_path(message, aws_byte_cursor_from_buf(path_buf));
+
+    if (downloader->endpoint) {
+        return;
+    }
+    char host_value[256];
+    snprintf(host_value, sizeof(host_value), "%s.s3.%s.amazonaws.com",
+             downloader->bucket, downloader->region);
+    struct aws_http_header host_header = {
+        .name = aws_byte_cursor_from_c_str("Host"),
+        .value = aws_byte_cursor_from_c_str(host_value),
+    };
+    aws_http_message_add_header(message, host_header);
+}
+
 static struct get_request_context *get_request_context_new(struct burst_downloader *downloader) {
     struct get_request_context *ctx =
         aws_mem_calloc(downloader->allocator, 1, sizeof(struct get_request_context));
@@ -243,30 +274,15 @@ int burst_downloader_get_object_size(struct burst_downloader *downloader) {
     // Set method to HEAD
     aws_http_message_set_request_method(message, aws_http_method_head);
 
-    // Set path: /KEY
     struct aws_byte_buf path_buf;
-    aws_byte_buf_init(&path_buf, downloader->allocator, strlen(downloader->key) + 2);
-    aws_byte_buf_append_byte_dynamic(&path_buf, '/');
-    struct aws_byte_cursor key_cursor = aws_byte_cursor_from_c_str(downloader->key);
-    aws_byte_buf_append_dynamic(&path_buf, &key_cursor);
-    struct aws_byte_cursor path_cursor = aws_byte_cursor_from_buf(&path_buf);
-    aws_http_message_set_request_path(message, path_cursor);
-
-    // Set Host header: BUCKET.s3.REGION.amazonaws.com
-    char host_value[256];
-    snprintf(host_value, sizeof(host_value), "%s.s3.%s.amazonaws.com",
-             downloader->bucket, downloader->region);
-    struct aws_http_header host_header = {
-        .name = aws_byte_cursor_from_c_str("Host"),
-        .value = aws_byte_cursor_from_c_str(host_value),
-    };
-    aws_http_message_add_header(message, host_header);
+    s3_set_request_target(downloader, message, &path_buf);
 
     // Create meta request options for HEAD
     struct aws_s3_meta_request_options request_options = {
         .type = AWS_S3_META_REQUEST_TYPE_DEFAULT,
         .operation_name = aws_byte_cursor_from_c_str("HeadObject"),
         .message = message,
+        .endpoint = downloader->endpoint,
         .user_data = ctx,
         .headers_callback = s3_get_headers_callback,
         .finish_callback = s3_get_finish_callback,
@@ -342,24 +358,8 @@ int burst_downloader_test_range_get(
     // Set method to GET
     aws_http_message_set_request_method(message, aws_http_method_get);
 
-    // Set path: /KEY
     struct aws_byte_buf path_buf;
-    aws_byte_buf_init(&path_buf, downloader->allocator, strlen(downloader->key) + 2);
-    aws_byte_buf_append_byte_dynamic(&path_buf, '/');
-    struct aws_byte_cursor key_cursor = aws_byte_cursor_from_c_str(downloader->key);
-    aws_byte_buf_append_dynamic(&path_buf, &key_cursor);
-    struct aws_byte_cursor path_cursor = aws_byte_cursor_from_buf(&path_buf);
-    aws_http_message_set_request_path(message, path_cursor);
-
-    // Set Host header: BUCKET.s3.REGION.amazonaws.com
-    char host_value[256];
-    snprintf(host_value, sizeof(host_value), "%s.s3.%s.amazonaws.com",
-             downloader->bucket, downloader->region);
-    struct aws_http_header host_header = {
-        .name = aws_byte_cursor_from_c_str("Host"),
-        .value = aws_byte_cursor_from_c_str(host_value),
-    };
-    aws_http_message_add_header(message, host_header);
+    s3_set_request_target(downloader, message, &path_buf);
 
     // Set Range header: bytes=START-END
     char range_value[128];
@@ -375,6 +375,7 @@ int burst_downloader_test_range_get(
     struct aws_s3_meta_request_options request_options = {
         .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
         .message = message,
+        .endpoint = downloader->endpoint,
         .user_data = ctx,
         .headers_callback = s3_get_headers_callback,
         .body_callback = s3_get_body_callback,
@@ -461,24 +462,8 @@ int burst_downloader_fetch_cd_part(
     // Set method to GET
     aws_http_message_set_request_method(message, aws_http_method_get);
 
-    // Set path: /KEY
     struct aws_byte_buf path_buf;
-    aws_byte_buf_init(&path_buf, downloader->allocator, strlen(downloader->key) + 2);
-    aws_byte_buf_append_byte_dynamic(&path_buf, '/');
-    struct aws_byte_cursor key_cursor = aws_byte_cursor_from_c_str(downloader->key);
-    aws_byte_buf_append_dynamic(&path_buf, &key_cursor);
-    struct aws_byte_cursor path_cursor = aws_byte_cursor_from_buf(&path_buf);
-    aws_http_message_set_request_path(message, path_cursor);
-
-    // Set Host header: BUCKET.s3.REGION.amazonaws.com
-    char host_value[256];
-    snprintf(host_value, sizeof(host_value), "%s.s3.%s.amazonaws.com",
-             downloader->bucket, downloader->region);
-    struct aws_http_header host_header = {
-        .name = aws_byte_cursor_from_c_str("Host"),
-        .value = aws_byte_cursor_from_c_str(host_value),
-    };
-    aws_http_message_add_header(message, host_header);
+    s3_set_request_target(downloader, message, &path_buf);
 
     // Set Range header using suffix-length syntax: bytes=-8388608 (last 8 MiB)
     struct aws_http_header range_header = {
@@ -491,6 +476,7 @@ int burst_downloader_fetch_cd_part(
     struct aws_s3_meta_request_options request_options = {
         .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
         .message = message,
+        .endpoint = downloader->endpoint,
         .user_data = ctx,
         .headers_callback = s3_get_headers_callback,
         .body_callback = s3_get_body_callback,
@@ -853,24 +839,8 @@ static int start_part_download_async(
     // Set method to GET
     aws_http_message_set_request_method(message, aws_http_method_get);
 
-    // Set path: /KEY
     struct aws_byte_buf path_buf;
-    aws_byte_buf_init(&path_buf, downloader->allocator, strlen(downloader->key) + 2);
-    aws_byte_buf_append_byte_dynamic(&path_buf, '/');
-    struct aws_byte_cursor key_cursor = aws_byte_cursor_from_c_str(downloader->key);
-    aws_byte_buf_append_dynamic(&path_buf, &key_cursor);
-    struct aws_byte_cursor path_cursor = aws_byte_cursor_from_buf(&path_buf);
-    aws_http_message_set_request_path(message, path_cursor);
-
-    // Set Host header
-    char host_value[256];
-    snprintf(host_value, sizeof(host_value), "%s.s3.%s.amazonaws.com",
-             downloader->bucket, downloader->region);
-    struct aws_http_header host_header = {
-        .name = aws_byte_cursor_from_c_str("Host"),
-        .value = aws_byte_cursor_from_c_str(host_value),
-    };
-    aws_http_message_add_header(message, host_header);
+    s3_set_request_target(downloader, message, &path_buf);
 
     // Set Range header
     char range_value[128];
@@ -886,6 +856,7 @@ static int start_part_download_async(
     struct aws_s3_meta_request_options request_options = {
         .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
         .message = message,
+        .endpoint = downloader->endpoint,
         .user_data = ctx,
         .headers_callback = s3_stream_headers_callback,
         .body_callback = s3_stream_body_callback,

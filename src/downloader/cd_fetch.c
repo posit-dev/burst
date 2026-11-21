@@ -536,24 +536,8 @@ static int start_range_fetch_async(struct cd_fetch_coordinator *coord, size_t ra
 
     aws_http_message_set_request_method(message, aws_http_method_get);
 
-    // Set path
     struct aws_byte_buf path_buf;
-    aws_byte_buf_init(&path_buf, downloader->allocator, strlen(downloader->key) + 2);
-    aws_byte_buf_append_byte_dynamic(&path_buf, '/');
-    struct aws_byte_cursor key_cursor = aws_byte_cursor_from_c_str(downloader->key);
-    aws_byte_buf_append_dynamic(&path_buf, &key_cursor);
-    struct aws_byte_cursor path_cursor = aws_byte_cursor_from_buf(&path_buf);
-    aws_http_message_set_request_path(message, path_cursor);
-
-    // Set Host header
-    char host_value[256];
-    snprintf(host_value, sizeof(host_value), "%s.s3.%s.amazonaws.com",
-             downloader->bucket, downloader->region);
-    struct aws_http_header host_header = {
-        .name = aws_byte_cursor_from_c_str("Host"),
-        .value = aws_byte_cursor_from_c_str(host_value),
-    };
-    aws_http_message_add_header(message, host_header);
+    s3_set_request_target(downloader, message, &path_buf);
 
     // Set Range header
     char range_value[128];
@@ -568,6 +552,7 @@ static int start_range_fetch_async(struct cd_fetch_coordinator *coord, size_t ra
     // Create meta request
     struct aws_s3_meta_request_options options = {
         .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .endpoint = downloader->endpoint,
         .message = message,
         .user_data = ctx,
         .headers_callback = cd_range_headers_callback,
@@ -1336,24 +1321,8 @@ static int hybrid_start_cd_range_fetch(struct hybrid_download_coordinator *coord
 
     aws_http_message_set_request_method(message, aws_http_method_get);
 
-    // Set path
     struct aws_byte_buf path_buf;
-    aws_byte_buf_init(&path_buf, downloader->allocator, strlen(downloader->key) + 2);
-    aws_byte_buf_append_byte_dynamic(&path_buf, '/');
-    struct aws_byte_cursor key_cursor = aws_byte_cursor_from_c_str(downloader->key);
-    aws_byte_buf_append_dynamic(&path_buf, &key_cursor);
-    struct aws_byte_cursor path_cursor = aws_byte_cursor_from_buf(&path_buf);
-    aws_http_message_set_request_path(message, path_cursor);
-
-    // Set Host header
-    char host_value[256];
-    snprintf(host_value, sizeof(host_value), "%s.s3.%s.amazonaws.com",
-             downloader->bucket, downloader->region);
-    struct aws_http_header host_header = {
-        .name = aws_byte_cursor_from_c_str("Host"),
-        .value = aws_byte_cursor_from_c_str(host_value),
-    };
-    aws_http_message_add_header(message, host_header);
+    s3_set_request_target(downloader, message, &path_buf);
 
     // Set Range header
     char range_value[128];
@@ -1368,6 +1337,7 @@ static int hybrid_start_cd_range_fetch(struct hybrid_download_coordinator *coord
     // Create meta request
     struct aws_s3_meta_request_options options = {
         .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .endpoint = downloader->endpoint,
         .message = message,
         .user_data = ctx,
         .headers_callback = hybrid_cd_range_headers_callback,
@@ -1439,24 +1409,8 @@ static int hybrid_start_part_download(struct hybrid_download_coordinator *coord,
 
     aws_http_message_set_request_method(message, aws_http_method_get);
 
-    // Set path
     struct aws_byte_buf path_buf;
-    aws_byte_buf_init(&path_buf, downloader->allocator, strlen(downloader->key) + 2);
-    aws_byte_buf_append_byte_dynamic(&path_buf, '/');
-    struct aws_byte_cursor key_cursor = aws_byte_cursor_from_c_str(downloader->key);
-    aws_byte_buf_append_dynamic(&path_buf, &key_cursor);
-    struct aws_byte_cursor path_cursor = aws_byte_cursor_from_buf(&path_buf);
-    aws_http_message_set_request_path(message, path_cursor);
-
-    // Set Host header
-    char host_value[256];
-    snprintf(host_value, sizeof(host_value), "%s.s3.%s.amazonaws.com",
-             downloader->bucket, downloader->region);
-    struct aws_http_header host_header = {
-        .name = aws_byte_cursor_from_c_str("Host"),
-        .value = aws_byte_cursor_from_c_str(host_value),
-    };
-    aws_http_message_add_header(message, host_header);
+    s3_set_request_target(downloader, message, &path_buf);
 
     // Set Range header
     char range_value[128];
@@ -1471,6 +1425,7 @@ static int hybrid_start_part_download(struct hybrid_download_coordinator *coord,
     // Create meta request
     struct aws_s3_meta_request_options options = {
         .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .endpoint = downloader->endpoint,
         .message = message,
         .user_data = ctx,
         .headers_callback = hybrid_part_headers_callback,

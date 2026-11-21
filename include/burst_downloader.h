@@ -30,6 +30,7 @@ struct burst_downloader {
     uint64_t part_size;  // Part size in bytes (8-64 MiB, must be multiple of 8 MiB)
     char *output_dir;
     char *profile_name;  // AWS profile name for SSO and credentials
+    struct aws_uri *endpoint;  // S3 endpoint override, e.g. localstack; NULL for AWS S3
 };
 
 // Create/destroy
@@ -44,6 +45,14 @@ struct burst_downloader *burst_downloader_create(
     const char *profile_name  // Can be NULL
 );
 void burst_downloader_destroy(struct burst_downloader *downloader);
+int burst_downloader_set_endpoint(struct burst_downloader *downloader, const char *url);
+
+struct aws_http_message;
+struct aws_byte_buf;
+// Sets the request path, and the Host header unless an endpoint is set. Caller cleans up path_buf.
+void s3_set_request_target(struct burst_downloader *downloader,
+                           struct aws_http_message *message,
+                           struct aws_byte_buf *path_buf);
 
 // Phase 1 test functions
 int burst_downloader_get_object_size(struct burst_downloader *downloader);
