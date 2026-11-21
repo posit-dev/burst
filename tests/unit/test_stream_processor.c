@@ -863,6 +863,54 @@ void test_wrong_frame_at_continuing_file(void) {
     free(cd);
 }
 
+// A part whose candidate continuing file ended in the previous part starts with a local header.
+void test_continuing_candidate_ended_before_part(void) {
+    uint8_t buffer[1024];
+    size_t offset = 0;
+
+    offset += create_local_header(buffer + offset, "next.txt");
+    size_t zstd_size = create_test_zstd_frame(buffer + offset, sizeof(buffer) - offset, 100);
+    offset += zstd_size;
+    offset += create_data_descriptor(buffer + offset, 0, (uint32_t)zstd_size, 100);
+
+    struct central_dir_parse_result *cd = calloc(1, sizeof(struct central_dir_parse_result));
+    cd->num_files = 2;
+    cd->files = calloc(2, sizeof(struct file_metadata));
+    cd->files[0].filename = strdup("ended.txt");
+    cd->files[0].part_index = 0;
+    cd->files[1].filename = strdup("next.txt");
+    cd->files[1].local_header_offset = BURST_BASE_PART_SIZE;
+    cd->files[1].compressed_size = zstd_size;
+    cd->files[1].uncompressed_size = 100;
+    cd->files[1].compression_method = ZIP_METHOD_ZSTD;
+    cd->files[1].part_index = 1;
+
+    cd->num_parts = 2;
+    cd->parts = calloc(2, sizeof(struct part_files));
+    cd->parts[1].num_entries = 1;
+    cd->parts[1].entries = calloc(1, sizeof(struct part_file_entry));
+    cd->parts[1].entries[0].file_index = 1;
+    cd->parts[1].continuing_file = &cd->files[0];
+
+    struct part_processor_state *state = part_processor_create(1, cd, test_output_dir, BURST_BASE_PART_SIZE);
+    TEST_ASSERT_NOT_NULL(state);
+
+    int rc = part_processor_process_data(state, buffer, offset);
+    TEST_ASSERT_EQUAL(STREAM_PROC_SUCCESS, rc);
+    rc = part_processor_finalize(state);
+    TEST_ASSERT_EQUAL(STREAM_PROC_SUCCESS, rc);
+    TEST_ASSERT_EQUAL(1, write_encoded_call_count);
+    TEST_ASSERT_EQUAL(100, total_uncompressed_bytes);
+
+    part_processor_destroy(state);
+    free(cd->files[0].filename);
+    free(cd->files[1].filename);
+    free(cd->files);
+    free(cd->parts[1].entries);
+    free(cd->parts);
+    free(cd);
+}
+
 // Test 16: Wrong frame type when expecting local header (got Zstd frame)
 void test_wrong_frame_at_local_header(void) {
     uint8_t buffer[1024];
@@ -1448,6 +1496,7 @@ int main(void) {
     // Multiple files and wrong frame types (14-16)
     RUN_TEST(test_multiple_files_in_single_part);
     RUN_TEST(test_wrong_frame_at_continuing_file);
+    RUN_TEST(test_continuing_candidate_ended_before_part);
     RUN_TEST(test_wrong_frame_at_local_header);
 
     // State machine tests (17-20)

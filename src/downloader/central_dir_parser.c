@@ -563,25 +563,21 @@ static int build_part_map(
         }
     }
 
-    // Determine continuing_file for each part
-    // A file continues into part N if its data extends beyond the part boundary
-    for (size_t part_idx = 1; part_idx < num_parts; part_idx++) {
-        uint64_t part_start = (uint64_t)part_idx * part_size;
-
-        // Search all files to find one that spans into this part
-        for (size_t i = 0; i < num_files; i++) {
-            uint64_t file_start = files[i].local_header_offset;
-            // Estimate end of file data: local header + compressed data + data descriptor
-            // Local header size is at least 30 bytes plus filename length
-            // We estimate conservatively; the file spans if its start is before part_start
-            // and its data extends past part_start
-            uint64_t file_data_end = file_start + 30 + files[i].compressed_size + 16;
-
-            if (file_start < part_start && file_data_end > part_start) {
-                // This file continues into this part
-                parts[part_idx].continuing_file = &files[i];
-                break;
-            }
+    // Determine continuing_file for each part: the last file starting before the part. Whether it
+    // really continues is decided by the part's first frame (Start-of-Part or a local header), because
+    // the CD sizes cannot locate the end of a file's data exactly.
+    for (size_t i = 0; i < num_files; i++) {
+        uint64_t next_part = files[i].local_header_offset / part_size + 1;
+        if (next_part < num_parts &&
+            (parts[next_part].continuing_file == NULL ||
+             files[i].local_header_offset > parts[next_part].continuing_file->local_header_offset)) {
+            parts[next_part].continuing_file = &files[i];
+        }
+    }
+    // A part with no file starting in the part before it inherits that part's candidate.
+    for (size_t part_idx = 2; part_idx < num_parts; part_idx++) {
+        if (parts[part_idx].continuing_file == NULL) {
+            parts[part_idx].continuing_file = parts[part_idx - 1].continuing_file;
         }
     }
 

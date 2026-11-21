@@ -490,6 +490,11 @@ int burst_writer_add_file(struct burst_writer *writer,
             free(entry->filename);
             return -1;
         }
+
+        // The padding and Start-of-Part frames sit before the descriptor, so they count as compressed data.
+        entry->compressed_size = writer->current_offset + writer->buffer_used - entry->compressed_start_offset;
+        entry->used_zip64_descriptor = entry->compressed_size > 0xFFFFFFFF ||
+                                       entry->uncompressed_size > 0xFFFFFFFF;
     }
 
     // Write data descriptor (use ZIP64 if sizes exceed 32-bit limit)

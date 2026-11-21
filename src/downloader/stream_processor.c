@@ -199,6 +199,11 @@ int part_processor_process_data(
                 return rc;
             }
 
+            // The candidate file ended before this part, which starts at a file or the central directory.
+            if (info.type == FRAME_ZIP_LOCAL_HEADER || info.type == FRAME_ZIP_CENTRAL_DIRECTORY) {
+                state->state = STATE_EXPECT_LOCAL_HEADER;
+                continue;
+            }
             if (info.type != FRAME_BURST_START_OF_PART) {
                 snprintf(state->error_message, sizeof(state->error_message),
                          "Expected Start-of-Part frame at part %u, got type %d",
