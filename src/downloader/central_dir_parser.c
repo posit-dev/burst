@@ -485,6 +485,7 @@ static int build_part_map(
     struct file_metadata *files, size_t num_files,
     uint64_t archive_size,
     uint64_t part_size,
+    uint64_t cd_offset,
     struct part_files **parts_out, size_t *num_parts_out)
 {
     // Calculate number of parts (round up)
@@ -578,6 +579,12 @@ static int build_part_map(
     for (size_t part_idx = 2; part_idx < num_parts; part_idx++) {
         if (parts[part_idx].continuing_file == NULL) {
             parts[part_idx].continuing_file = parts[part_idx - 1].continuing_file;
+        }
+    }
+    // Parts that start inside the central directory hold no file data.
+    for (size_t part_idx = 1; part_idx < num_parts; part_idx++) {
+        if ((uint64_t)part_idx * part_size >= cd_offset) {
+            parts[part_idx].continuing_file = NULL;
         }
     }
 
@@ -846,7 +853,7 @@ int central_dir_parse_from_cd_buffer(const uint8_t *cd_buffer, size_t cd_buffer_
     }
 
     // Build part mapping
-    rc = build_part_map(result->files, result->num_files, archive_size, part_size,
+    rc = build_part_map(result->files, result->num_files, archive_size, part_size, cd_offset,
                         &result->parts, &result->num_parts);
     if (rc != CENTRAL_DIR_PARSE_SUCCESS) {
         // Cleanup files on error

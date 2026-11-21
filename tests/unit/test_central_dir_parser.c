@@ -591,6 +591,24 @@ void test_continuing_file_is_last_file_before_part(void) {
     central_dir_parse_result_free(&result);
 }
 
+// A part that starts inside the central directory holds no file data, so it has no candidate.
+void test_no_continuing_file_inside_central_directory(void) {
+    const uint64_t mib = 1024 * 1024;
+    uint32_t offsets[] = {0, 100};
+    uint32_t sizes[] = {50, 50};
+    uint8_t buffer[2 * 51 + 22];
+    uint64_t archive_size = 8 * mib + 50;  // The CD (124 bytes) crosses the 8 MiB boundary
+    size_t len = build_cd_tail(buffer, offsets, sizes, 2, archive_size);
+
+    struct central_dir_parse_result result;
+    int rc = central_dir_parse(buffer, len, archive_size, BURST_BASE_PART_SIZE, &result);
+    TEST_ASSERT_EQUAL_INT(CENTRAL_DIR_PARSE_SUCCESS, rc);
+    TEST_ASSERT_EQUAL_size_t(2, result.num_parts);
+    TEST_ASSERT_NULL(result.parts[1].continuing_file);
+
+    central_dir_parse_result_free(&result);
+}
+
 void test_no_continuing_file(void) {
     struct central_dir_parse_result result;
     int rc = central_dir_parse(minimal_zip, sizeof(minimal_zip),
@@ -1341,6 +1359,7 @@ int main(void) {
     RUN_TEST(test_continuing_file_detection);
     RUN_TEST(test_no_continuing_file);
     RUN_TEST(test_continuing_file_is_last_file_before_part);
+    RUN_TEST(test_no_continuing_file_inside_central_directory);
 
     // Error handling tests
     RUN_TEST(test_null_buffer);
