@@ -31,6 +31,7 @@ struct file_entry {
     uint32_t uid;
     uint32_t gid;
     int64_t mtime;           // Unix seconds, written as an extended timestamp extra field
+    bool has_mtime;          // False until burst_writer_set_entry_attrs; no timestamp field is written
     uint8_t *xattr_field;    // Complete extended-attributes extra field, or NULL
     size_t xattr_field_len;
     // ZIP64 tracking

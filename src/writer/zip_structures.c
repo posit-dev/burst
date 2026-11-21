@@ -116,9 +116,11 @@ int write_central_directory(struct burst_writer *writer) {
 
         extra_field_len = build_unix_extra_field(extra_field, extra_field_cap,
                                                  entry->uid, entry->gid);
-        extra_field_len += build_timestamp_extra_field(extra_field + extra_field_len,
-                                                       extra_field_cap - extra_field_len,
-                                                       entry->mtime);
+        if (entry->has_mtime) {
+            extra_field_len += build_timestamp_extra_field(extra_field + extra_field_len,
+                                                           extra_field_cap - extra_field_len,
+                                                           entry->mtime);
+        }
 
         // Determine if ZIP64 extra field is needed for this entry
         bool need_zip64 = (entry->compressed_size > 0xFFFFFFFF) ||

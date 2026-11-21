@@ -159,6 +159,9 @@ static int ensure_file_capacity(struct burst_writer *writer) {
             fprintf(stderr, "Failed to expand file tracking array\n");
             return -1;
         }
+        // Zeroed like the initial calloc, so burst_writer_destroy never frees uninitialized pointers.
+        memset(new_files + writer->files_capacity, 0,
+               (new_capacity - writer->files_capacity) * sizeof(struct file_entry));
         writer->files = new_files;
         writer->files_capacity = new_capacity;
     }
@@ -672,7 +675,9 @@ static size_t calculate_cdfh_size(const struct file_entry *entry) {
 
     // Unix extra field is always 15 bytes
     size += 15;
-    size += ZIP_EXTRA_TIMESTAMP_SIZE;
+    if (entry->has_mtime) {
+        size += ZIP_EXTRA_TIMESTAMP_SIZE;
+    }
     size += entry->xattr_field_len;
 
     // ZIP64 extra field if needed (each field present adds 8 bytes)
@@ -750,6 +755,7 @@ int burst_writer_set_entry_attrs(struct burst_writer *writer, const char *path, 
     }
     struct file_entry *entry = &writer->files[writer->num_files - 1];
     entry->mtime = mtime;
+    entry->has_mtime = true;
 
     ssize_t names_len = llistxattr(path, NULL, 0);
     if (names_len < 0) {
