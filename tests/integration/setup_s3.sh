@@ -45,6 +45,11 @@ fi
 
 # Set defaults
 : "${BURST_TEST_BUCKET:=burst-integration-tests}"
+
+# Optional S3-compatible endpoint such as localstack; the AWS CLI reads AWS_ENDPOINT_URL.
+if [ -n "${BURST_TEST_ENDPOINT:-}" ]; then
+    export AWS_ENDPOINT_URL="$BURST_TEST_ENDPOINT"
+fi
 : "${AWS_REGION:=us-east-1}"
 
 S3_PREFIX="fixtures"
