@@ -5,6 +5,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <sys/types.h>
+#include <sys/xattr.h>
 
 #define INITIAL_FILES_CAPACITY 16
 #define WRITE_BUFFER_SIZE (64 * 1024)  // 64 KiB write buffer
@@ -83,6 +85,7 @@ void burst_writer_destroy(struct burst_writer *writer) {
     if (writer->files) {
         for (size_t i = 0; i < writer->num_files; i++) {
             free(writer->files[i].filename);
+            free(writer->files[i].xattr_field);
         }
         free(writer->files);
     }
@@ -669,6 +672,8 @@ static size_t calculate_cdfh_size(const struct file_entry *entry) {
 
     // Unix extra field is always 15 bytes
     size += 15;
+    size += ZIP_EXTRA_TIMESTAMP_SIZE;
+    size += entry->xattr_field_len;
 
     // ZIP64 extra field if needed (each field present adds 8 bytes)
     bool need_zip64 = (entry->compressed_size > 0xFFFFFFFF) ||
@@ -733,6 +738,90 @@ static uint32_t find_first_cdfh_in_tail(const struct burst_writer *writer,
 
     // No complete CDFH in tail (shouldn't happen if CD extends past tail)
     return BURST_EOCD_NO_CDFH_IN_TAIL;
+}
+
+// Extra fields in one central directory header share a 16-bit length with the Unix,
+// timestamp and ZIP64 fields, so attributes past this budget are dropped with a warning.
+#define XATTR_FIELD_MAX 65000
+
+int burst_writer_set_entry_attrs(struct burst_writer *writer, const char *path, int64_t mtime) {
+    if (!writer || writer->num_files == 0) {
+        return -1;
+    }
+    struct file_entry *entry = &writer->files[writer->num_files - 1];
+    entry->mtime = mtime;
+
+    ssize_t names_len = llistxattr(path, NULL, 0);
+    if (names_len < 0) {
+        if (errno == ENOTSUP) {
+            return 0;
+        }
+        fprintf(stderr, "Warning: cannot list xattrs of %s: %s\n", path, strerror(errno));
+        return -1;
+    }
+    if (names_len == 0) {
+        return 0;
+    }
+
+    char *names = malloc((size_t)names_len);
+    uint8_t *field = malloc(XATTR_FIELD_MAX);
+    uint8_t *value = malloc(65536);
+    if (!names || !field || !value) {
+        free(names);
+        free(field);
+        free(value);
+        return -1;
+    }
+    names_len = llistxattr(path, names, (size_t)names_len);
+    if (names_len < 0) {
+        fprintf(stderr, "Warning: cannot list xattrs of %s: %s\n", path, strerror(errno));
+        free(names);
+        free(field);
+        free(value);
+        return -1;
+    }
+
+    // Header ID (2) | TSize (2) | Version (1) = 1 | repeated: name_len (1) | name | value_len (2, LE) | value
+    size_t len = 5;
+    size_t count = 0;
+    for (char *name = names; name < names + names_len; name += strlen(name) + 1) {
+        size_t name_len = strlen(name);
+        ssize_t value_len = lgetxattr(path, name, value, 65536);
+        if (value_len < 0) {
+            fprintf(stderr, "Warning: cannot read xattr %s of %s: %s\n", name, path, strerror(errno));
+            continue;
+        }
+        size_t need = 1 + name_len + 2 + (size_t)value_len;
+        if (name_len > 255 || len + need > XATTR_FIELD_MAX) {
+            fprintf(stderr, "Warning: xattr %s of %s does not fit in the archive, skipping\n", name, path);
+            continue;
+        }
+        field[len++] = (uint8_t)name_len;
+        memcpy(field + len, name, name_len);
+        len += name_len;
+        field[len++] = (uint8_t)(value_len & 0xFF);
+        field[len++] = (uint8_t)((value_len >> 8) & 0xFF);
+        memcpy(field + len, value, (size_t)value_len);
+        len += (size_t)value_len;
+        count++;
+    }
+    free(names);
+    free(value);
+
+    if (count == 0) {
+        free(field);
+        return 0;
+    }
+    field[0] = ZIP_EXTRA_BURST_XATTR_ID & 0xFF;
+    field[1] = (ZIP_EXTRA_BURST_XATTR_ID >> 8) & 0xFF;
+    field[2] = (uint8_t)((len - 4) & 0xFF);
+    field[3] = (uint8_t)(((len - 4) >> 8) & 0xFF);
+    field[4] = 1;
+
+    free(entry->xattr_field);
+    entry->xattr_field = field;
+    entry->xattr_field_len = len;
+    return 0;
 }
 
 int burst_writer_finalize(struct burst_writer *writer) {
