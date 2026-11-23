@@ -13,7 +13,8 @@ jobs:
     strategy:
       matrix:
         include:
-          - runner: ubuntu-latest
+          # Pinned so the binaries link against OpenSSL 3.0 and run on Ubuntu 24.04 hosts.
+          - runner: ubuntu-24.04
             arch: x86_64
           - runner: ubuntu-24.04-arm
             arch: arm64
