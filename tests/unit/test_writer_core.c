@@ -128,7 +128,9 @@ void test_writer_buffer_overflow(void) {
 // Returns whether the archive's central directory holds an extended timestamp (0x5455) field.
 static bool archive_has_timestamp_field(FILE *f) {
     long size = ftell(f);
+    TEST_ASSERT_GREATER_THAN(0, size);
     uint8_t *buf = malloc((size_t)size);
+    TEST_ASSERT_NOT_NULL(buf);
     fseek(f, 0, SEEK_SET);
     size_t n = fread(buf, 1, (size_t)size, f);
     bool found = false;
@@ -139,6 +141,9 @@ static bool archive_has_timestamp_field(FILE *f) {
         uint16_t name_len, extra_len;
         memcpy(&name_len, buf + i + 28, 2);
         memcpy(&extra_len, buf + i + 30, 2);
+        if (i + 46 + name_len + extra_len > n) {
+            continue;
+        }
         const uint8_t *extra = buf + i + 46 + name_len;
         for (size_t pos = 0; pos + 4 <= extra_len; ) {
             uint16_t id, len;
@@ -154,7 +159,9 @@ static bool archive_has_timestamp_field(FILE *f) {
 
 static FILE *write_one_directory(bool set_attrs) {
     FILE *tmp = tmpfile();
+    TEST_ASSERT_NOT_NULL(tmp);
     struct burst_writer *writer = burst_writer_create(tmp, 3);
+    TEST_ASSERT_NOT_NULL(writer);
     const char *name = "dir/";
     uint8_t lfh_buf[sizeof(struct zip_local_header) + 4];
     struct zip_local_header *lfh = (struct zip_local_header *)lfh_buf;
