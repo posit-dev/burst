@@ -191,6 +191,7 @@ bash ../../tests/integration/test_writer_basic.sh  # Run integration test
 ```
 
 ### Test Labels
+- `unit` - Tests from [tests/unit/](tests/unit/) plus `test_central_dir_parser_integration` (14 tests) - selected by the release workflow
 - `integration` - Non-unit tests (17 tests)
 - `s3` - Requires S3 access (10 tests)
 - `e2e` - End-to-end tests (7 tests)

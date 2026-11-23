@@ -56,6 +56,7 @@ function(add_unit_test test_name)
         unity
     )
     add_test(NAME ${test_name} COMMAND ${test_name})
+    set_tests_properties(${test_name} PROPERTIES LABELS "unit")
 endfunction()
 
 # Helper function to add mocked unit tests
@@ -102,6 +103,7 @@ function(add_mocked_test test_name mock_headers)
     )
 
     add_test(NAME ${test_name} COMMAND ${test_name})
+    set_tests_properties(${test_name} PROPERTIES LABELS "unit")
 endfunction()
 
 # Helper library with downloader components for testing (no AWS dependencies)
@@ -312,6 +314,18 @@ target_link_libraries(test_central_dir_parser_integration
     unity
 )
 add_test(NAME test_central_dir_parser_integration COMMAND test_central_dir_parser_integration)
+
+# test_central_dir_parser_integration only reads tests/fixtures (no S3 or BTRFS), so it counts as unit.
+set_tests_properties(
+    test_writer_helpers
+    test_central_dir_parser
+    test_entry_processor
+    test_stream_processor
+    test_frame_parser
+    test_parts_calculation
+    test_cd_fetch
+    test_central_dir_parser_integration
+    PROPERTIES LABELS "unit")
 
 # Padding LFH integration test (verifies 7zz extraction)
 add_executable(test_padding_lfh_extraction integration/test_padding_lfh_extraction.c)

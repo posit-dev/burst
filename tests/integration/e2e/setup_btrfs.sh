@@ -20,7 +20,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 TMP_DIR="$PROJECT_ROOT/tests/tmp"
 BTRFS_MOUNT_DIR="$TMP_DIR/btrfs"
 BTRFS_LOOP_IMAGE="$TMP_DIR/loop_devices/btrfs.img"
