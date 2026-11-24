@@ -23,12 +23,12 @@
  *
  * For each part `part_idx` being downloaded:
  *
- * 1. **Check for continuing file**: `parts[part_idx].continuing_file` is the last
+ * 1. **Check for continuing file**: `parts[part_idx].last_file_before_part` is the last
  *    file starting before this part. If the part begins with a Start-of-Part
  *    metadata frame, the first bytes are that file's data, and the frame contains
  *    the uncompressed offset where they should be written. If it begins with a
  *    local header, the file ended in an earlier part. The
- *    `continuing_file` pointer provides the file's metadata (filename, expected
+ *    `last_file_before_part` pointer provides the file's metadata (filename, expected
  *    sizes, etc.).
  *
  * 2. **Process files starting in this part**: The `parts[part_idx].entries[]`
@@ -62,10 +62,10 @@
  *     size_t offset = 0;
  *     size_t entry_idx = 0;
  *
- *     // Handle continuing file from previous part
- *     if (part->continuing_file != NULL) {
+ *     // A Start-of-Part frame at offset 0 means last_file_before_part continues here
+ *     if (part->last_file_before_part != NULL && starts_with_start_of_part(part_data)) {
  *         // Parse Start-of-Part frame at offset 0 for uncompressed_offset
- *         // Write subsequent Zstd frames to continuing_file at that offset
+ *         // Write subsequent Zstd frames to last_file_before_part at that offset
  *         // Advance offset past the continuing file's data
  *     }
  *
@@ -148,15 +148,16 @@ struct part_file_entry {
  * downloads. The `entries` array is sorted by `offset_in_part` so the stream
  * processor can match local headers to file metadata as it traverses sequentially.
  *
- * The `continuing_file` pointer handles files that span part boundaries: if a
- * file's compressed data extends from a previous part into this one, the stream
- * processor needs to know which file it belongs to (for the output filename and
- * to track the uncompressed offset from the Start-of-Part metadata frame).
+ * The `last_file_before_part` pointer handles files that span part boundaries: if
+ * the part begins with a Start-of-Part frame, that file's compressed data extends
+ * from a previous part into this one, and the stream processor needs to know which
+ * file it belongs to (for the output filename and to track the uncompressed offset
+ * from the Start-of-Part metadata frame).
  */
 struct part_files {
     struct part_file_entry *entries;   // Sorted by offset_in_part ascending
     size_t num_entries;
-    struct file_metadata *continuing_file;  // Last file starting before this part, or NULL if none
+    struct file_metadata *last_file_before_part;  // Last file starting before this part, or NULL if none
 };
 
 /**

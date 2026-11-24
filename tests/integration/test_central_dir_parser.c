@@ -129,7 +129,7 @@ static void test_zip_file(const char *zip_name, const char *description) {
         "Part 0 should have 2 file entries");
 
     // No continuing file in part 0
-    TEST_ASSERT_NULL_MESSAGE(result.parts[0].continuing_file,
+    TEST_ASSERT_NULL_MESSAGE(result.parts[0].last_file_before_part,
         "Part 0 should have no continuing file");
 
     // Entries should be sorted by offset

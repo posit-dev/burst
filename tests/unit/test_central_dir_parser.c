@@ -383,7 +383,7 @@ void test_part_map_single_part(void) {
     TEST_ASSERT_EQUAL_size_t(1, result.parts[0].num_entries);
     TEST_ASSERT_EQUAL_size_t(0, result.parts[0].entries[0].file_index);
     TEST_ASSERT_EQUAL_UINT64(0, result.parts[0].entries[0].offset_in_part);
-    TEST_ASSERT_NULL(result.parts[0].continuing_file);
+    TEST_ASSERT_NULL(result.parts[0].last_file_before_part);
 
     central_dir_parse_result_free(&result);
 }
@@ -445,7 +445,7 @@ void test_entries_sorted_by_offset(void) {
 }
 
 void test_continuing_file_detection(void) {
-    // Test the continuing_file pointer logic.
+    // Test the last_file_before_part pointer logic.
     //
     // Scenario: A 10 MiB archive where:
     // - File 0 starts at offset 0, compressed_size = 9 MiB (spans into part 1)
@@ -528,12 +528,12 @@ void test_continuing_file_detection(void) {
 
     // Part 0: file 0 starts here
     TEST_ASSERT_EQUAL_size_t(1, result.parts[0].num_entries);
-    TEST_ASSERT_NULL(result.parts[0].continuing_file);
+    TEST_ASSERT_NULL(result.parts[0].last_file_before_part);
 
     // Part 1: file 1 starts here, file 0 continues from part 0
     TEST_ASSERT_EQUAL_size_t(1, result.parts[1].num_entries);
-    TEST_ASSERT_NOT_NULL(result.parts[1].continuing_file);
-    TEST_ASSERT_EQUAL_STRING("a.txt", result.parts[1].continuing_file->filename);
+    TEST_ASSERT_NOT_NULL(result.parts[1].last_file_before_part);
+    TEST_ASSERT_EQUAL_STRING("a.txt", result.parts[1].last_file_before_part->filename);
 
     central_dir_parse_result_free(&result);
 }
@@ -582,11 +582,11 @@ void test_continuing_file_is_last_file_before_part(void) {
     TEST_ASSERT_EQUAL_INT(CENTRAL_DIR_PARSE_SUCCESS, rc);
     TEST_ASSERT_EQUAL_size_t(4, result.num_parts);
 
-    TEST_ASSERT_NULL(result.parts[0].continuing_file);
-    TEST_ASSERT_EQUAL_STRING("f1.tx", result.parts[1].continuing_file->filename);
+    TEST_ASSERT_NULL(result.parts[0].last_file_before_part);
+    TEST_ASSERT_EQUAL_STRING("f1.tx", result.parts[1].last_file_before_part->filename);
     // No file starts in parts 1 and 2, so f1 is the candidate for both.
-    TEST_ASSERT_EQUAL_STRING("f1.tx", result.parts[2].continuing_file->filename);
-    TEST_ASSERT_EQUAL_STRING("f1.tx", result.parts[3].continuing_file->filename);
+    TEST_ASSERT_EQUAL_STRING("f1.tx", result.parts[2].last_file_before_part->filename);
+    TEST_ASSERT_EQUAL_STRING("f1.tx", result.parts[3].last_file_before_part->filename);
 
     central_dir_parse_result_free(&result);
 }
@@ -604,7 +604,7 @@ void test_no_continuing_file_inside_central_directory(void) {
     int rc = central_dir_parse(buffer, len, archive_size, BURST_BASE_PART_SIZE, &result);
     TEST_ASSERT_EQUAL_INT(CENTRAL_DIR_PARSE_SUCCESS, rc);
     TEST_ASSERT_EQUAL_size_t(2, result.num_parts);
-    TEST_ASSERT_NULL(result.parts[1].continuing_file);
+    TEST_ASSERT_NULL(result.parts[1].last_file_before_part);
 
     central_dir_parse_result_free(&result);
 }
@@ -615,7 +615,7 @@ void test_no_continuing_file(void) {
                                sizeof(minimal_zip), BURST_BASE_PART_SIZE, &result);
 
     TEST_ASSERT_EQUAL_INT(CENTRAL_DIR_PARSE_SUCCESS, rc);
-    TEST_ASSERT_NULL(result.parts[0].continuing_file);
+    TEST_ASSERT_NULL(result.parts[0].last_file_before_part);
 
     central_dir_parse_result_free(&result);
 }
