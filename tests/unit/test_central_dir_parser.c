@@ -383,7 +383,7 @@ void test_part_map_single_part(void) {
     TEST_ASSERT_EQUAL_size_t(1, result.parts[0].num_entries);
     TEST_ASSERT_EQUAL_size_t(0, result.parts[0].entries[0].file_index);
     TEST_ASSERT_EQUAL_UINT64(0, result.parts[0].entries[0].offset_in_part);
-    TEST_ASSERT_NULL(result.parts[0].continuing_file);
+    TEST_ASSERT_NULL(result.parts[0].last_file_before_part);
 
     central_dir_parse_result_free(&result);
 }
@@ -445,7 +445,7 @@ void test_entries_sorted_by_offset(void) {
 }
 
 void test_continuing_file_detection(void) {
-    // Test the continuing_file pointer logic.
+    // Test the last_file_before_part pointer logic.
     //
     // Scenario: A 10 MiB archive where:
     // - File 0 starts at offset 0, compressed_size = 9 MiB (spans into part 1)
@@ -528,12 +528,83 @@ void test_continuing_file_detection(void) {
 
     // Part 0: file 0 starts here
     TEST_ASSERT_EQUAL_size_t(1, result.parts[0].num_entries);
-    TEST_ASSERT_NULL(result.parts[0].continuing_file);
+    TEST_ASSERT_NULL(result.parts[0].last_file_before_part);
 
     // Part 1: file 1 starts here, file 0 continues from part 0
     TEST_ASSERT_EQUAL_size_t(1, result.parts[1].num_entries);
-    TEST_ASSERT_NOT_NULL(result.parts[1].continuing_file);
-    TEST_ASSERT_EQUAL_STRING("a.txt", result.parts[1].continuing_file->filename);
+    TEST_ASSERT_NOT_NULL(result.parts[1].last_file_before_part);
+    TEST_ASSERT_EQUAL_STRING("a.txt", result.parts[1].last_file_before_part->filename);
+
+    central_dir_parse_result_free(&result);
+}
+
+// Builds a CD + EOCD for files at the given offsets, with the CD ending at archive_size.
+static size_t build_cd_tail(uint8_t *buffer, const uint32_t *offsets, const uint32_t *sizes,
+                            size_t n, uint64_t archive_size) {
+    size_t pos = 0;
+    for (size_t i = 0; i < n; i++) {
+        uint8_t *cd = buffer + pos;
+        memset(cd, 0, 51);
+        cd[0] = 0x50; cd[1] = 0x4b; cd[2] = 0x01; cd[3] = 0x02;
+        memcpy(cd + 20, &sizes[i], 4);
+        memcpy(cd + 24, &sizes[i], 4);
+        cd[28] = 5;
+        memcpy(cd + 42, &offsets[i], 4);
+        char name[6];
+        snprintf(name, sizeof(name), "f%u.tx", (unsigned)i);
+        memcpy(cd + 46, name, 5);
+        pos += 51;
+    }
+    uint8_t *eocd = buffer + pos;
+    memset(eocd, 0, 22);
+    eocd[0] = 0x50; eocd[1] = 0x4b; eocd[2] = 0x05; eocd[3] = 0x06;
+    eocd[8] = (uint8_t)n;
+    eocd[10] = (uint8_t)n;
+    uint32_t cd_size = (uint32_t)pos;
+    memcpy(eocd + 12, &cd_size, 4);
+    uint32_t cd_offset = (uint32_t)(archive_size - pos - 22);
+    memcpy(eocd + 16, &cd_offset, 4);
+    return pos + 22;
+}
+
+// The CD's compressed size does not cover the local header name and extra fields, so a file whose
+// data ends just short of a boundary on that estimate can still continue into the next part.
+void test_continuing_file_is_last_file_before_part(void) {
+    const uint64_t mib = 1024 * 1024;
+    uint32_t offsets[] = {0, (uint32_t)(8 * mib - 200), (uint32_t)(24 * mib + 10)};
+    uint32_t sizes[] = {100, 100, 100};
+    uint8_t buffer[3 * 51 + 22];
+    uint64_t archive_size = 26 * mib;
+    size_t len = build_cd_tail(buffer, offsets, sizes, 3, archive_size);
+
+    struct central_dir_parse_result result;
+    int rc = central_dir_parse(buffer, len, archive_size, BURST_BASE_PART_SIZE, &result);
+    TEST_ASSERT_EQUAL_INT(CENTRAL_DIR_PARSE_SUCCESS, rc);
+    TEST_ASSERT_EQUAL_size_t(4, result.num_parts);
+
+    TEST_ASSERT_NULL(result.parts[0].last_file_before_part);
+    TEST_ASSERT_EQUAL_STRING("f1.tx", result.parts[1].last_file_before_part->filename);
+    // No file starts in parts 1 and 2, so f1 is the candidate for both.
+    TEST_ASSERT_EQUAL_STRING("f1.tx", result.parts[2].last_file_before_part->filename);
+    TEST_ASSERT_EQUAL_STRING("f1.tx", result.parts[3].last_file_before_part->filename);
+
+    central_dir_parse_result_free(&result);
+}
+
+// A part that starts inside the central directory holds no file data, so it has no candidate.
+void test_no_continuing_file_inside_central_directory(void) {
+    const uint64_t mib = 1024 * 1024;
+    uint32_t offsets[] = {0, 100};
+    uint32_t sizes[] = {50, 50};
+    uint8_t buffer[2 * 51 + 22];
+    uint64_t archive_size = 8 * mib + 50;  // The CD (124 bytes) crosses the 8 MiB boundary
+    size_t len = build_cd_tail(buffer, offsets, sizes, 2, archive_size);
+
+    struct central_dir_parse_result result;
+    int rc = central_dir_parse(buffer, len, archive_size, BURST_BASE_PART_SIZE, &result);
+    TEST_ASSERT_EQUAL_INT(CENTRAL_DIR_PARSE_SUCCESS, rc);
+    TEST_ASSERT_EQUAL_size_t(2, result.num_parts);
+    TEST_ASSERT_NULL(result.parts[1].last_file_before_part);
 
     central_dir_parse_result_free(&result);
 }
@@ -544,7 +615,7 @@ void test_no_continuing_file(void) {
                                sizeof(minimal_zip), BURST_BASE_PART_SIZE, &result);
 
     TEST_ASSERT_EQUAL_INT(CENTRAL_DIR_PARSE_SUCCESS, rc);
-    TEST_ASSERT_NULL(result.parts[0].continuing_file);
+    TEST_ASSERT_NULL(result.parts[0].last_file_before_part);
 
     central_dir_parse_result_free(&result);
 }
@@ -1287,6 +1358,8 @@ int main(void) {
     RUN_TEST(test_entries_sorted_by_offset);
     RUN_TEST(test_continuing_file_detection);
     RUN_TEST(test_no_continuing_file);
+    RUN_TEST(test_continuing_file_is_last_file_before_part);
+    RUN_TEST(test_no_continuing_file_inside_central_directory);
 
     // Error handling tests
     RUN_TEST(test_null_buffer);

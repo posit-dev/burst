@@ -173,17 +173,17 @@ int part_processor_process_data(
         // Handle state machine
         switch (state->state) {
         case STATE_INIT: {
-            // Check if there's a continuing file for this part
+            // If a file started before this part, the first frame decides whether it continues here
             struct part_files *part = &state->cd_result->parts[state->part_index];
-            if (part->continuing_file != NULL) {
-                state->state = STATE_CONTINUING_FILE;
+            if (part->last_file_before_part != NULL) {
+                state->state = STATE_CHECK_PART_START;
             } else {
                 state->state = STATE_EXPECT_LOCAL_HEADER;
             }
             continue;  // Re-enter loop with new state
         }
 
-        case STATE_CONTINUING_FILE: {
+        case STATE_CHECK_PART_START: {
             // Expect Start-of-Part frame at offset 0
             struct frame_info info;
             int rc = parse_next_frame(ptr, remaining, &info);
@@ -199,6 +199,11 @@ int part_processor_process_data(
                 return rc;
             }
 
+            // The candidate file ended before this part, which starts at a file or the central directory.
+            if (info.type == FRAME_ZIP_LOCAL_HEADER || info.type == FRAME_ZIP_CENTRAL_DIRECTORY) {
+                state->state = STATE_EXPECT_LOCAL_HEADER;
+                continue;
+            }
             if (info.type != FRAME_BURST_START_OF_PART) {
                 snprintf(state->error_message, sizeof(state->error_message),
                          "Expected Start-of-Part frame at part %u, got type %d",
@@ -559,7 +564,7 @@ static int handle_start_of_part_frame(struct part_processor_state *state,
     // No file open yet - this is a continuing file at the start of a downloaded part.
     // Get the continuing file metadata from the part map.
     struct part_files *part = &state->cd_result->parts[state->part_index];
-    struct file_metadata *file_meta = part->continuing_file;
+    struct file_metadata *file_meta = part->last_file_before_part;
 
     if (file_meta == NULL) {
         snprintf(state->error_message, sizeof(state->error_message),

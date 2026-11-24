@@ -485,6 +485,7 @@ static int build_part_map(
     struct file_metadata *files, size_t num_files,
     uint64_t archive_size,
     uint64_t part_size,
+    uint64_t cd_offset,
     struct part_files **parts_out, size_t *num_parts_out)
 {
     // Calculate number of parts (round up)
@@ -499,9 +500,9 @@ static int build_part_map(
         return CENTRAL_DIR_PARSE_ERR_MEMORY;
     }
 
-    // Initialize all parts with NULL continuing_file
+    // Initialize all parts with NULL last_file_before_part
     for (size_t i = 0; i < num_parts; i++) {
-        parts[i].continuing_file = NULL;
+        parts[i].last_file_before_part = NULL;
     }
 
     // First pass: count how many files start in each part
@@ -563,25 +564,27 @@ static int build_part_map(
         }
     }
 
-    // Determine continuing_file for each part
-    // A file continues into part N if its data extends beyond the part boundary
+    // Determine last_file_before_part for each part. Whether that file really continues into the part
+    // is decided by the part's first frame (Start-of-Part or a local header), because the CD sizes
+    // cannot locate the end of a file's data exactly.
+    for (size_t i = 0; i < num_files; i++) {
+        uint64_t next_part = files[i].local_header_offset / part_size + 1;
+        if (next_part < num_parts &&
+            (parts[next_part].last_file_before_part == NULL ||
+             files[i].local_header_offset > parts[next_part].last_file_before_part->local_header_offset)) {
+            parts[next_part].last_file_before_part = &files[i];
+        }
+    }
+    // A part with no file starting in the part before it inherits that part's candidate.
+    for (size_t part_idx = 2; part_idx < num_parts; part_idx++) {
+        if (parts[part_idx].last_file_before_part == NULL) {
+            parts[part_idx].last_file_before_part = parts[part_idx - 1].last_file_before_part;
+        }
+    }
+    // Parts that start inside the central directory hold no file data.
     for (size_t part_idx = 1; part_idx < num_parts; part_idx++) {
-        uint64_t part_start = (uint64_t)part_idx * part_size;
-
-        // Search all files to find one that spans into this part
-        for (size_t i = 0; i < num_files; i++) {
-            uint64_t file_start = files[i].local_header_offset;
-            // Estimate end of file data: local header + compressed data + data descriptor
-            // Local header size is at least 30 bytes plus filename length
-            // We estimate conservatively; the file spans if its start is before part_start
-            // and its data extends past part_start
-            uint64_t file_data_end = file_start + 30 + files[i].compressed_size + 16;
-
-            if (file_start < part_start && file_data_end > part_start) {
-                // This file continues into this part
-                parts[part_idx].continuing_file = &files[i];
-                break;
-            }
+        if ((uint64_t)part_idx * part_size >= cd_offset) {
+            parts[part_idx].last_file_before_part = NULL;
         }
     }
 
@@ -850,7 +853,7 @@ int central_dir_parse_from_cd_buffer(const uint8_t *cd_buffer, size_t cd_buffer_
     }
 
     // Build part mapping
-    rc = build_part_map(result->files, result->num_files, archive_size, part_size,
+    rc = build_part_map(result->files, result->num_files, archive_size, part_size, cd_offset,
                         &result->parts, &result->num_parts);
     if (rc != CENTRAL_DIR_PARSE_SUCCESS) {
         // Cleanup files on error
