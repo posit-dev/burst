@@ -50,6 +50,11 @@ fi
 TEST_BUCKET="${BURST_TEST_BUCKET:-burst-integration-tests}"
 AWS_REGION="${AWS_REGION:-us-east-1}"
 
+# Optional S3-compatible endpoint such as localstack; the AWS CLI reads AWS_ENDPOINT_URL.
+if [ -n "${BURST_TEST_ENDPOINT:-}" ]; then
+    export AWS_ENDPOINT_URL="$BURST_TEST_ENDPOINT"
+fi
+
 # Use the compressible fixture for this test
 FIXTURE_NAME="compressible-many-files"
 FIXTURE_KEY="fixtures/$FIXTURE_NAME.zip"
@@ -214,6 +219,7 @@ run_download_test() {
             --bucket "$TEST_BUCKET" \
             --key "$FIXTURE_KEY" \
             --region "$AWS_REGION" \
+            ${BURST_TEST_ENDPOINT:+--endpoint "$BURST_TEST_ENDPOINT"} \
             --output-dir "$extract_dir" \
             --part-size "$part_size" \
             --profile "$AWS_PROFILE"
@@ -222,6 +228,7 @@ run_download_test() {
             --bucket "$TEST_BUCKET" \
             --key "$FIXTURE_KEY" \
             --region "$AWS_REGION" \
+            ${BURST_TEST_ENDPOINT:+--endpoint "$BURST_TEST_ENDPOINT"} \
             --output-dir "$extract_dir" \
             --part-size "$part_size"
     fi

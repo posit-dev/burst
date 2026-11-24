@@ -144,7 +144,7 @@ To run the Zstandard compression tests, you need 7-Zip with Zstandard codec supp
 
 #### Additional Testing Dependencies
 ```bash
-sudo apt-get install -y unzip
+sudo apt-get install -y unzip btrfs-compsize
 ```
 
 ## Running Tests

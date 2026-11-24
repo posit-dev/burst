@@ -42,6 +42,11 @@ fi
 TEST_BUCKET="${BURST_TEST_BUCKET:-burst-integration-tests}"
 AWS_REGION="${AWS_REGION:-us-east-1}"
 
+# Optional S3-compatible endpoint such as localstack; the AWS CLI reads AWS_ENDPOINT_URL.
+if [ -n "${BURST_TEST_ENDPOINT:-}" ]; then
+    export AWS_ENDPOINT_URL="$BURST_TEST_ENDPOINT"
+fi
+
 # Use the small fixture for this test (single part, fastest)
 FIXTURE_NAME="small"
 FIXTURE_KEY="fixtures/$FIXTURE_NAME.zip"
@@ -156,6 +161,7 @@ if [ -n "$AWS_PROFILE" ]; then
         --bucket "$TEST_BUCKET" \
         --key "$FIXTURE_KEY" \
         --region "$AWS_REGION" \
+        ${BURST_TEST_ENDPOINT:+--endpoint "$BURST_TEST_ENDPOINT"} \
         --output-dir "extracted" \
         --profile "$AWS_PROFILE"
 else
@@ -163,6 +169,7 @@ else
         --bucket "$TEST_BUCKET" \
         --key "$FIXTURE_KEY" \
         --region "$AWS_REGION" \
+        ${BURST_TEST_ENDPOINT:+--endpoint "$BURST_TEST_ENDPOINT"} \
         --output-dir "extracted"
 fi
 
