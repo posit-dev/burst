@@ -137,6 +137,7 @@ echo "Downloading and extracting fixture to BTRFS mount..."
     --bucket "$BURST_TEST_BUCKET" \
     --key "$FIXTURE_KEY" \
     --region "$AWS_REGION" \
+    ${BURST_TEST_ENDPOINT:+--endpoint "$BURST_TEST_ENDPOINT"} \
     --output-dir "$SEED_DIR"
 
 if [ $? -ne 0 ]; then
@@ -268,6 +269,7 @@ mkdir -p "$EXTRACT_DIR"
     --bucket "$BURST_TEST_BUCKET" \
     --key "$S3_KEY" \
     --region "$AWS_REGION" \
+    ${BURST_TEST_ENDPOINT:+--endpoint "$BURST_TEST_ENDPOINT"} \
     --output-dir "$EXTRACT_DIR"
 
 if [ $? -ne 0 ]; then

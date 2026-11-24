@@ -45,6 +45,13 @@ fi
 TEST_BUCKET="${BURST_TEST_BUCKET:-burst-integration-tests}"
 AWS_REGION="${AWS_REGION:-us-east-1}"
 
+# Optional S3-compatible endpoint such as localstack; the AWS CLI reads AWS_ENDPOINT_URL.
+ENDPOINT_ARGS=()
+if [ -n "${BURST_TEST_ENDPOINT:-}" ]; then
+    export AWS_ENDPOINT_URL="$BURST_TEST_ENDPOINT"
+    ENDPOINT_ARGS=(--endpoint "$BURST_TEST_ENDPOINT")
+fi
+
 # Use the large-cd fixture for this test
 FIXTURE_NAME="large-cd"
 FIXTURE_KEY="fixtures/$FIXTURE_NAME.zip"
@@ -166,6 +173,7 @@ if [ -n "$AWS_PROFILE" ]; then
         --bucket "$TEST_BUCKET" \
         --key "$FIXTURE_KEY" \
         --region "$AWS_REGION" \
+        "${ENDPOINT_ARGS[@]}" \
         --output-dir "extracted" \
         --profile "$AWS_PROFILE" 2>&1 | tee downloader.log
 else
@@ -173,6 +181,7 @@ else
         --bucket "$TEST_BUCKET" \
         --key "$FIXTURE_KEY" \
         --region "$AWS_REGION" \
+        "${ENDPOINT_ARGS[@]}" \
         --output-dir "extracted" 2>&1 | tee downloader.log
 fi
 
@@ -195,8 +204,9 @@ if grep -q "Central directory extends before tail buffer" downloader.log; then
 elif grep -q "Fetching.*additional range" downloader.log; then
     echo -e "${GREEN}✓${NC} Large CD fetch path activated (additional ranges fetched)"
 else
-    echo -e "${YELLOW}⚠${NC} Could not confirm large CD fetch path was used"
-    echo "  (This may indicate the CD fit in the initial 8 MiB buffer)"
+    echo -e "${RED}✗ FAILED: large CD fetch path was not used${NC}"
+    echo "  (The CD fit in the initial 8 MiB buffer, so this test covered nothing)"
+    exit 1
 fi
 echo ""
 

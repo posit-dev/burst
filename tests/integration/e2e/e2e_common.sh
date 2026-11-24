@@ -44,6 +44,11 @@ load_s3_config() {
     export BURST_TEST_BUCKET
     export AWS_REGION
     export BURST_TEST_KEY_PREFIX
+
+    # Optional S3-compatible endpoint such as localstack; the AWS CLI reads AWS_ENDPOINT_URL.
+    if [ -n "${BURST_TEST_ENDPOINT:-}" ]; then
+        export AWS_ENDPOINT_URL="$BURST_TEST_ENDPOINT"
+    fi
 }
 
 # Check prerequisites
