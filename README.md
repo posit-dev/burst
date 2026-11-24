@@ -165,4 +165,26 @@ ctest                             # Run all tests
 ctest -V                          # Verbose output
 ctest -R test_alignment           # Run specific test
 ctest -L slow --parallel 4        # Slow tests with 4 jobs
+```
+
+### Running S3 tests against localstack
+
+Tests labelled `s3` use real S3 by default. To run them against [localstack](https://github.com/localstack/localstack) instead, set `BURST_TEST_ENDPOINT`: the test scripts then pass it to `burst-downloader --endpoint` and to the AWS CLI. CI doesn't set it, so CI still uses real S3.
+
+```bash
+# localstack 4.4.0: 3.x omits Content-Range on ranged HEAD requests, which burst-downloader needs
+docker run -d --name burst-localstack -p 4566:4566 localstack/localstack:4.4.0
+
+export BURST_TEST_ENDPOINT=http://localhost:4566
+export BURST_TEST_BUCKET=burst-integration-tests
+export AWS_REGION=us-east-1 AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test
+AWS_ENDPOINT_URL=$BURST_TEST_ENDPOINT aws s3 mb s3://$BURST_TEST_BUCKET
+
+# Fixtures for the integration tests that read pre-built archives (needs /usr/share/dict/words, e.g. the wamerican package)
+bash tests/integration/setup_s3.sh
+
+cd build && ctest -L s3 --output-on-failure
+```
+
+With an endpoint set, requests put the bucket in the path (`/bucket/key`) instead of the hostname; the rest of the aws-c-s3 request path is unchanged. The E2E tests also need a BTRFS mount, which `tests/integration/e2e/setup_btrfs.sh` creates with `sudo`.
 
