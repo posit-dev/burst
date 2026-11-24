@@ -12,6 +12,7 @@
 
 void setUp(void) {
     Mock_burst_writer_mock_Init();
+    burst_writer_set_entry_attrs_IgnoreAndReturn(0);
 }
 
 void tearDown(void) {

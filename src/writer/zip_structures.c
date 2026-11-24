@@ -105,14 +105,22 @@ int write_central_directory(struct burst_writer *writer) {
         struct zip_central_header header;
         memset(&header, 0, sizeof(header));
 
-        // Build extra fields for central directory
-        // Buffer holds Unix extra field (15 bytes) + ZIP64 extra field (up to 28 bytes)
-        uint8_t extra_field[64];
+        // Build extra fields for central directory: Unix (15) + timestamp (9) + ZIP64 (up to 28)
+        // + extended attributes (variable)
+        size_t extra_field_cap = 64 + entry->xattr_field_len;
+        uint8_t *extra_field = malloc(extra_field_cap);
+        if (!extra_field) {
+            return -1;
+        }
         size_t extra_field_len = 0;
 
-        // Add Unix extra field
-        extra_field_len = build_unix_extra_field(extra_field, sizeof(extra_field),
+        extra_field_len = build_unix_extra_field(extra_field, extra_field_cap,
                                                  entry->uid, entry->gid);
+        if (entry->has_mtime) {
+            extra_field_len += build_timestamp_extra_field(extra_field + extra_field_len,
+                                                           extra_field_cap - extra_field_len,
+                                                           entry->mtime);
+        }
 
         // Determine if ZIP64 extra field is needed for this entry
         bool need_zip64 = (entry->compressed_size > 0xFFFFFFFF) ||
@@ -124,16 +132,22 @@ int write_central_directory(struct burst_writer *writer) {
         if (need_zip64) {
             zip64_len = build_zip64_extra_field(
                 extra_field + extra_field_len,
-                sizeof(extra_field) - extra_field_len,
+                extra_field_cap - extra_field_len,
                 entry->compressed_size,
                 entry->uncompressed_size,
                 entry->local_header_offset);
 
             if (zip64_len == 0) {
                 fprintf(stderr, "Failed to build ZIP64 extra field for %s\n", entry->filename);
+                free(extra_field);
                 return -1;
             }
             extra_field_len += zip64_len;
+        }
+
+        if (entry->xattr_field_len > 0) {
+            memcpy(extra_field + extra_field_len, entry->xattr_field, entry->xattr_field_len);
+            extra_field_len += entry->xattr_field_len;
         }
 
         header.signature = ZIP_CENTRAL_DIR_HEADER_SIG;
@@ -171,21 +185,16 @@ int write_central_directory(struct burst_writer *writer) {
         header.internal_file_attributes = 0;
         header.external_file_attributes = entry->unix_mode << 16;  // Unix mode in upper 16 bits
 
-        // Write central directory header
-        if (burst_writer_write(writer, &header, sizeof(header)) != 0) {
-            return -1;
+        int rc = burst_writer_write(writer, &header, sizeof(header));
+        if (rc == 0) {
+            rc = burst_writer_write(writer, entry->filename, header.filename_length);
         }
-
-        // Write filename
-        if (burst_writer_write(writer, entry->filename, header.filename_length) != 0) {
-            return -1;
+        if (rc == 0) {
+            rc = burst_writer_write(writer, extra_field, extra_field_len);
         }
-
-        // Write extra field (Unix + ZIP64 if present)
-        if (extra_field_len > 0) {
-            if (burst_writer_write(writer, extra_field, extra_field_len) != 0) {
-                return -1;
-            }
+        free(extra_field);
+        if (rc != 0) {
+            return -1;
         }
     }
 
@@ -460,4 +469,27 @@ size_t build_zip64_extra_field(uint8_t *buffer, size_t buffer_size,
     }
 
     return total_size;
+}
+
+size_t build_timestamp_extra_field(uint8_t *buffer, size_t buffer_size, int64_t mtime) {
+    // Info-ZIP extended timestamp (0x5455), central directory form:
+    //   Header ID (2) | TSize (2) = 5 | Flags (1) = 0x01 (mtime present) | mtime (4, signed, LE)
+    if (buffer_size < ZIP_EXTRA_TIMESTAMP_SIZE) {
+        return 0;
+    }
+    int32_t mtime32 = (int32_t)mtime;
+    if ((int64_t)mtime32 != mtime) {
+        mtime32 = mtime < 0 ? INT32_MIN : INT32_MAX;
+    }
+    uint32_t m = (uint32_t)mtime32;
+    buffer[0] = ZIP_EXTRA_TIMESTAMP_ID & 0xFF;
+    buffer[1] = (ZIP_EXTRA_TIMESTAMP_ID >> 8) & 0xFF;
+    buffer[2] = 5;
+    buffer[3] = 0;
+    buffer[4] = 0x01;
+    buffer[5] = m & 0xFF;
+    buffer[6] = (m >> 8) & 0xFF;
+    buffer[7] = (m >> 16) & 0xFF;
+    buffer[8] = (m >> 24) & 0xFF;
+    return ZIP_EXTRA_TIMESTAMP_SIZE;
 }

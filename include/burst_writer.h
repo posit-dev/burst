@@ -30,6 +30,10 @@ struct file_entry {
     uint32_t unix_mode;  // Full mode including file type (S_IFREG, S_IFLNK, etc.)
     uint32_t uid;
     uint32_t gid;
+    int64_t mtime;           // Unix seconds, written as an extended timestamp extra field
+    bool has_mtime;          // False until burst_writer_set_entry_attrs; no timestamp field is written
+    uint8_t *xattr_field;    // Complete extended-attributes extra field, or NULL
+    size_t xattr_field_len;
     // ZIP64 tracking
     bool used_zip64_descriptor;  // True if data descriptor used 64-bit sizes
 };
@@ -116,6 +120,11 @@ int burst_writer_add_directory(struct burst_writer *writer,
                                 uint32_t unix_mode,
                                 uint32_t uid,
                                 uint32_t gid);
+
+// Record mtime and extended attributes for the entry added most recently.
+// path: file on disk to read extended attributes from (symlinks are not followed)
+// Returns 0 on success, -1 if there is no entry or reading attributes failed.
+int burst_writer_set_entry_attrs(struct burst_writer *writer, const char *path, int64_t mtime);
 
 int burst_writer_finalize(struct burst_writer *writer);
 

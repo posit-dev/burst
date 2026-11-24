@@ -37,6 +37,11 @@
 // ZIP extra field IDs
 #define ZIP_EXTRA_UNIX_7875_ID 0x7875  // Info-ZIP Unix extra field (uid/gid)
 #define ZIP_EXTRA_ZIP64_ID 0x0001      // ZIP64 extended information extra field
+#define ZIP_EXTRA_TIMESTAMP_ID 0x5455  // Info-ZIP extended timestamp (mtime, Unix seconds)
+#define ZIP_EXTRA_BURST_XATTR_ID 0x4258  // BURST extended attributes, central directory only
+
+// Extended timestamp extra field holding mtime only: header (4) + flags (1) + mtime (4)
+#define ZIP_EXTRA_TIMESTAMP_SIZE 9
 
 // BURST EOCD comment format (8 bytes):
 // Bytes 0-3: Magic "BRST" (0x54535242 little-endian)
@@ -180,6 +185,10 @@ int write_padding_lfh(struct burst_writer *writer, size_t target_size);
 // The buffer must be at least 15 bytes (2+2+1+1+4+1+4)
 // Format: Header ID (2) + TSize (2) + Version (1) + UIDSize (1) + UID (4) + GIDSize (1) + GID (4)
 size_t build_unix_extra_field(uint8_t *buffer, size_t buffer_size, uint32_t uid, uint32_t gid);
+
+// Writes an Info-ZIP extended timestamp extra field (0x5455) holding mtime.
+// Returns ZIP_EXTRA_TIMESTAMP_SIZE, or 0 if the buffer is too small.
+size_t build_timestamp_extra_field(uint8_t *buffer, size_t buffer_size, int64_t mtime);
 
 // Build ZIP64 extended information extra field (0x0001) for central directory
 // Returns the size of the extra field written, or 0 if ZIP64 not needed or error

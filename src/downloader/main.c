@@ -168,8 +168,12 @@ static int process_single_part_archive(
 
     int finalize_rc = part_processor_finalize(processor);
     part_processor_destroy(processor);
+    if (finalize_rc != STREAM_PROC_SUCCESS) {
+        return -1;
+    }
 
-    return finalize_rc == STREAM_PROC_SUCCESS ? 0 : -1;
+    apply_deferred_metadata(cd_result, downloader->output_dir);
+    return 0;
 }
 
 int burst_downloader_extract(struct burst_downloader *downloader) {
@@ -394,6 +398,7 @@ int burst_downloader_extract(struct burst_downloader *downloader) {
         downloader, &cd_result, body_segments, num_body_segments);
 
     if (result == 0) {
+        apply_deferred_metadata(&cd_result, downloader->output_dir);
         printf("\nExtraction complete! %zu files extracted.\n", cd_result.num_files);
     }
 

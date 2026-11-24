@@ -1,11 +1,13 @@
 #!/bin/bash
 #
-# End-to-End Test: Unix File Metadata (Permissions, Owner/Group, Symlinks)
+# End-to-End Test: Unix File Metadata (Permissions, Owner/Group, Symlinks, xattrs, mtimes)
 #
 # Tests:
-#   - File permissions preservation through round-trip
+#   - File permissions preservation through round-trip, including setuid/setgid on non-root-owned files
 #   - uid/gid preservation (requires sudo for downloader)
 #   - Symlink target preservation
+#   - Extended attributes, including a file capability on a file spanning several parts
+#   - mtimes of files and symlinks
 #
 # Requirements:
 #   - sudo access (for BTRFS setup and running downloader with root privileges)
@@ -26,7 +28,7 @@ source "$SCRIPT_DIR/e2e_common.sh"
 source "$SCRIPT_DIR/setup_btrfs.sh"
 
 # Test configuration
-TEST_NAME="E2E Unix Metadata (permissions, uid/gid, symlinks)"
+TEST_NAME="E2E Unix Metadata (permissions, uid/gid, symlinks, xattrs, mtimes)"
 TEST_ID="unix-meta-$(date +%s)"
 TEST_WORK_DIR="$E2E_TMP_DIR/test_unix_meta_$TEST_ID"
 S3_KEY="${BURST_TEST_KEY_PREFIX}${TEST_ID}.zip"
@@ -182,6 +184,22 @@ chmod 0644 input/target.txt
 ln -s target.txt input/relative_link.txt
 ln -s ../input/target.txt input/path_link.txt
 
+# setuid/setgid on files owned by a non-root user: chown after chmod would clear these bits
+echo "setuid content" > input/setuid_file.bin
+echo "setgid content" > input/setgid_file.bin
+sudo chown "$TEST_UID:$TEST_GID" input/setuid_file.bin input/setgid_file.bin
+sudo chmod 4755 input/setuid_file.bin
+sudo chmod 2755 input/setgid_file.bin
+
+# A file capability on a file spanning several 8 MiB parts: any write after setcap would clear it
+head -c $((20 * 1024 * 1024)) /dev/urandom > input/large_cap.bin
+sudo setcap 'cap_net_raw=ep' input/large_cap.bin
+python3 -c 'import os, sys; os.setxattr(sys.argv[1], "user.burst_test", b"hello")' input/normal_file.txt
+
+# Fixed mtimes, applied last so nothing above moves them
+touch -d '2001-02-03 04:05:06 UTC' input/exec_file.bin
+touch -h -d '2002-03-04 05:06:07 UTC' input/relative_link.txt
+
 echo -e "${GREEN}OK${NC} Created test files with metadata"
 
 # Step 2: Store original metadata
@@ -194,6 +212,12 @@ META_SECRET=$(store_file_metadata input/secret_file.txt)
 META_NORMAL=$(store_file_metadata input/normal_file.txt)
 META_OWNED=$(store_file_metadata input/owned_file.txt)
 META_TARGET=$(store_file_metadata input/target.txt)
+META_SETUID=$(store_file_metadata input/setuid_file.bin)
+META_SETGID=$(store_file_metadata input/setgid_file.bin)
+CAPS_LARGE=$(getcap input/large_cap.bin | awk '{print $2}')
+XATTR_NORMAL=$(python3 -c 'import os, sys; print(os.getxattr(sys.argv[1], "user.burst_test").decode())' input/normal_file.txt)
+MTIME_EXEC=$(stat -c %Y input/exec_file.bin)
+MTIME_LINK=$(stat -c %Y input/relative_link.txt)
 
 # Store symlink targets
 LINK_REL=$(store_symlink_target input/relative_link.txt)
@@ -205,6 +229,9 @@ echo "  normal_file.txt:  $META_NORMAL"
 echo "  owned_file.txt:   $META_OWNED"
 echo "  relative_link.txt -> $LINK_REL"
 echo "  path_link.txt -> $LINK_PATH"
+echo "  setuid_file.bin:  $META_SETUID"
+echo "  setgid_file.bin:  $META_SETGID"
+echo "  large_cap.bin caps: $CAPS_LARGE"
 
 # Also store checksums for content verification
 store_checksums "input" "checksums_original.txt"
@@ -214,7 +241,7 @@ echo -e "${GREEN}OK${NC} Stored original metadata and checksums"
 echo ""
 echo "Step 3: Creating BURST archive..."
 # Note: burst-writer needs to handle symlinks and preserve permissions
-"$BURST_WRITER" -l 3 -o test.zip input/exec_file.bin input/secret_file.txt input/normal_file.txt input/owned_file.txt input/target.txt input/relative_link.txt input/path_link.txt
+"$BURST_WRITER" -l 3 -o test.zip input/exec_file.bin input/secret_file.txt input/normal_file.txt input/owned_file.txt input/target.txt input/relative_link.txt input/path_link.txt input/setuid_file.bin input/setgid_file.bin input/large_cap.bin
 archive_size=$(stat -c%s "test.zip")
 echo -e "${GREEN}OK${NC} Created archive: test.zip ($archive_size bytes)"
 
@@ -299,6 +326,39 @@ verify_symlink_target "$EXTRACT_DIR/path_link.txt" "$LINK_PATH" || exit 1
 echo -e "  ${GREEN}OK${NC} path_link.txt -> $LINK_PATH"
 
 echo -e "${GREEN}OK${NC} All symlinks preserved"
+
+# Step 10: Verify setuid/setgid, xattrs and mtimes
+echo ""
+echo "Step 10: Verifying setuid/setgid, extended attributes and mtimes..."
+verify_file_metadata "$EXTRACT_DIR/setuid_file.bin" "$META_SETUID" || exit 1
+verify_file_metadata "$EXTRACT_DIR/setgid_file.bin" "$META_SETGID" || exit 1
+echo -e "  ${GREEN}OK${NC} setuid_file.bin: $META_SETUID, setgid_file.bin: $META_SETGID"
+
+actual_caps=$(getcap "$EXTRACT_DIR/large_cap.bin" | awk '{print $2}')
+if [ "$actual_caps" != "$CAPS_LARGE" ]; then
+    echo -e "${RED}FAIL${NC} large_cap.bin capabilities: expected '$CAPS_LARGE', got '$actual_caps'"
+    exit 1
+fi
+echo -e "  ${GREEN}OK${NC} large_cap.bin caps: $actual_caps"
+
+actual_xattr=$(sudo python3 -c 'import os, sys; print(os.getxattr(sys.argv[1], "user.burst_test").decode())' "$EXTRACT_DIR/normal_file.txt")
+if [ "$actual_xattr" != "$XATTR_NORMAL" ]; then
+    echo -e "${RED}FAIL${NC} normal_file.txt user.burst_test: expected '$XATTR_NORMAL', got '$actual_xattr'"
+    exit 1
+fi
+echo -e "  ${GREEN}OK${NC} normal_file.txt user.burst_test=$actual_xattr"
+
+for pair in "exec_file.bin:$MTIME_EXEC" "relative_link.txt:$MTIME_LINK"; do
+    name=${pair%%:*}
+    expected=${pair#*:}
+    actual=$(stat -c %Y "$EXTRACT_DIR/$name")
+    if [ "$actual" != "$expected" ]; then
+        echo -e "${RED}FAIL${NC} $name mtime: expected $expected, got $actual"
+        exit 1
+    fi
+    echo -e "  ${GREEN}OK${NC} $name mtime: $actual"
+done
+echo -e "${GREEN}OK${NC} setuid/setgid, extended attributes and mtimes preserved"
 
 # Success
 print_test_result "$TEST_NAME" 0

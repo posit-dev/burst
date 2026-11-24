@@ -318,6 +318,22 @@ Standard ZIP Central Directory header. Key fields for BURST:
 - `compressed_size` / `uncompressed_size`: Actual sizes (not deferred)
 - `external_file_attributes`: Contains Unix mode bits (upper 16 bits)
 
+Extra fields in each central directory header, in this order:
+
+| ID | Name | Contents |
+|----|------|----------|
+| `0x7875` | Info-ZIP Unix | Version 1, 4-byte uid, 4-byte gid |
+| `0x5455` | Info-ZIP extended timestamp | Flags `0x01`, then mtime as signed 32-bit Unix seconds |
+| `0x0001` | ZIP64 | Only when a size or offset exceeds 32 bits |
+| `0x4258` | BURST extended attributes | Only when the entry has xattrs. Version byte `1`, then for each attribute: name length (1 byte), name, value length (2 bytes, LE), value |
+
+The `0x4258` field appears only in the central directory. All extra fields of one header share
+the 16-bit extra field length, so the writer drops attributes that would exceed it, with a warning.
+
+The downloader applies mtimes and extended attributes after every part has been written:
+on Linux, any write to a file clears its `security.capability` xattr and moves its mtime, and a
+file spanning several parts can still be receiving data after the part that closes it finishes.
+
 ### End of Central Directory
 
 Standard ZIP EOCD with:

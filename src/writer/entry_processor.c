@@ -177,6 +177,14 @@ static struct zip_local_header* build_directory_local_file_header(
     return lfh;
 }
 
+// A failure here loses only the entry's xattrs, so it warns rather than failing the archive.
+static void record_entry_attrs(struct burst_writer *writer, const char *input_path,
+                               const struct stat *file_stat) {
+    if (burst_writer_set_entry_attrs(writer, input_path, (int64_t)file_stat->st_mtime) != 0) {
+        fprintf(stderr, "Warning: extended attributes not recorded for %s\n", input_path);
+    }
+}
+
 int process_entry(struct burst_writer *writer,
                   const char *input_path,
                   const char *archive_name,
@@ -205,6 +213,7 @@ int process_entry(struct burst_writer *writer,
                                        file_stat->st_uid,
                                        file_stat->st_gid) == 0) {
             success = 1;
+            record_entry_attrs(writer, input_path, file_stat);
         } else {
             fprintf(stderr, "Failed to add directory: %s\n", input_path);
         }
@@ -227,6 +236,7 @@ int process_entry(struct burst_writer *writer,
         if (burst_writer_add_symlink(writer, lfh, lfh_len, symlink_target, target_len,
                                       file_stat->st_mode, file_stat->st_uid, file_stat->st_gid) == 0) {
             success = 1;
+            record_entry_attrs(writer, input_path, file_stat);
         } else {
             fprintf(stderr, "Failed to add symlink: %s\n", input_path);
         }
@@ -256,6 +266,7 @@ int process_entry(struct burst_writer *writer,
         if (burst_writer_add_file(writer, input, lfh, lfh_len,
                                   file_stat->st_mode, file_stat->st_uid, file_stat->st_gid) == 0) {
             success = 1;
+            record_entry_attrs(writer, input_path, file_stat);
         } else {
             fprintf(stderr, "Failed to add file: %s\n", input_path);
         }

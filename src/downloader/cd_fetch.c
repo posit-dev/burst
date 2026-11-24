@@ -1630,6 +1630,9 @@ int hybrid_coordinator_run(struct hybrid_download_coordinator *coord) {
         }
     }
 
+    if (coord->full_cd) {
+        apply_deferred_metadata(coord->full_cd, coord->downloader->output_dir);
+    }
     return 0;
 }
 

@@ -782,6 +782,21 @@ static int open_output_file(struct part_processor_state *state,
             return STREAM_PROC_ERR_IO;
         }
 
+        // Apply Unix ownership if available and running as root
+        if (state->current_file->has_unix_extra && geteuid() == 0) {
+#ifdef BURST_PROFILE
+            PROFILE_TIME_BLOCK(g_profile_stats.inode_time_ns, {
+                (void)chown(state->current_file->filename, state->current_file->uid, state->current_file->gid);
+            });
+            PROFILE_COUNT(g_profile_stats.inode_count);
+#else
+            if (chown(state->current_file->filename, state->current_file->uid, state->current_file->gid) != 0) {
+                fprintf(stderr, "Warning: failed to set ownership on directory %s: %s\n",
+                        state->current_file->filename, strerror(errno));
+            }
+#endif
+        }
+
         // Apply Unix permissions if available
         if (state->current_file->has_unix_mode) {
             mode_t mode = state->current_file->unix_mode & 07777;
@@ -793,21 +808,6 @@ static int open_output_file(struct part_processor_state *state,
 #else
             if (chmod(state->current_file->filename, mode) != 0) {
                 fprintf(stderr, "Warning: failed to set permissions on directory %s: %s\n",
-                        state->current_file->filename, strerror(errno));
-            }
-#endif
-        }
-
-        // Apply Unix ownership if available and running as root
-        if (state->current_file->has_unix_extra && geteuid() == 0) {
-#ifdef BURST_PROFILE
-            PROFILE_TIME_BLOCK(g_profile_stats.inode_time_ns, {
-                (void)chown(state->current_file->filename, state->current_file->uid, state->current_file->gid);
-            });
-            PROFILE_COUNT(g_profile_stats.inode_count);
-#else
-            if (chown(state->current_file->filename, state->current_file->uid, state->current_file->gid) != 0) {
-                fprintf(stderr, "Warning: failed to set ownership on directory %s: %s\n",
                         state->current_file->filename, strerror(errno));
             }
 #endif
@@ -938,18 +938,7 @@ static int close_output_file(struct part_processor_state *state)
                     state->current_file->filename, strerror(errno));
         }
 
-        // Apply Unix permissions if available
-        if (state->current_file->has_unix_mode) {
-            // Extract permission bits only (lower 12 bits: rwx + setuid/setgid/sticky)
-            mode_t mode = state->current_file->unix_mode & 07777;
-            if (fchmod(state->current_file->fd, mode) != 0) {
-                // Log but don't fail
-                fprintf(stderr, "Warning: failed to set permissions on %s: %s\n",
-                        state->current_file->filename, strerror(errno));
-            }
-        }
-
-        // Apply Unix ownership if available and running as root
+        // Ownership first: chown clears setuid/setgid and file capabilities on non-directories.
         if (state->current_file->has_unix_extra) {
             if (geteuid() == 0) {
                 if (fchown(state->current_file->fd, state->current_file->uid, state->current_file->gid) != 0) {
@@ -959,6 +948,17 @@ static int close_output_file(struct part_processor_state *state)
                 }
             }
             // Silently skip chown when not running as root
+        }
+
+        // Apply Unix permissions if available
+        if (state->current_file->has_unix_mode) {
+            // Extract permission bits only (lower 12 bits: rwx + setuid/setgid/sticky)
+            mode_t mode = state->current_file->unix_mode & 07777;
+            if (fchmod(state->current_file->fd, mode) != 0) {
+                // Log but don't fail
+                fprintf(stderr, "Warning: failed to set permissions on %s: %s\n",
+                        state->current_file->filename, strerror(errno));
+            }
         }
 
         close(state->current_file->fd);

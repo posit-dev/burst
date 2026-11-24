@@ -124,6 +124,10 @@ struct file_metadata {
     bool has_unix_mode;                // True if unix_mode was extracted
     bool has_unix_extra;               // True if uid/gid were extracted from extra field
     bool is_symlink;                   // True if (unix_mode & S_IFMT) == S_IFLNK
+    int64_t mtime;                     // Unix seconds (from 0x5455 extra field)
+    bool has_mtime;
+    uint8_t *xattrs;                   // Allocated copy of the 0x4258 field's data, or NULL
+    uint16_t xattrs_len;
 
     // ZIP64 tracking
     bool uses_zip64_descriptor;        // True if sizes exceed 32-bit (data descriptor is 24 bytes)
@@ -305,5 +309,13 @@ int central_dir_parse_partial(const uint8_t *buffer, size_t buffer_size,
  * @param result Result structure to free (can be NULL)
  */
 void central_dir_parse_result_free(struct central_dir_parse_result *result);
+
+/**
+ * Set mtimes and extended attributes on every extracted entry.
+ *
+ * Must run after all parts are written: a later write to a file would clear its
+ * security.capability xattr and move its mtime. Failures are warnings.
+ */
+void apply_deferred_metadata(const struct central_dir_parse_result *result, const char *output_dir);
 
 #endif // CENTRAL_DIR_PARSER_H

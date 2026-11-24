@@ -31,6 +31,8 @@ int burst_writer_add_symlink(void *writer,
                               uint32_t uid,
                               uint32_t gid);
 
+int burst_writer_set_entry_attrs(void *writer, const char *path, int64_t mtime);
+
 int burst_writer_add_directory(void *writer,
                                 void *lfh,
                                 int lfh_len,

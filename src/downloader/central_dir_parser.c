@@ -4,10 +4,56 @@
 #include <string.h>
 #include <stdio.h>
 #include <sys/stat.h>
+#include <sys/xattr.h>
+#include <fcntl.h>
+#include <errno.h>
 
 // ZIP64 signatures and constants
 #define ZIP64_EOCD_LOCATOR_SIG 0x07064b50
 #define ZIP64_EOCD_SIG 0x06064b50
+
+static void free_file_metadata_fields(struct file_metadata *meta) {
+    free(meta->filename);
+    free(meta->xattrs);
+}
+
+/**
+ * Parse the extended timestamp (0x5455) and BURST xattr (0x4258) extra fields.
+ * Malformed fields are ignored. Returns false only on allocation failure.
+ */
+static bool parse_attr_extra_fields(const uint8_t *extra_field, uint16_t extra_len,
+                                    struct file_metadata *meta) {
+    const uint8_t *ptr = extra_field;
+    const uint8_t *end = extra_field + extra_len;
+
+    while (ptr + 4 <= end) {
+        uint16_t header_id;
+        uint16_t data_size;
+        memcpy(&header_id, ptr, sizeof(uint16_t));
+        memcpy(&data_size, ptr + 2, sizeof(uint16_t));
+        ptr += 4;
+        if (ptr + data_size > end) {
+            return true;
+        }
+
+        if (header_id == ZIP_EXTRA_TIMESTAMP_ID && data_size >= 5 && (ptr[0] & 0x01)) {
+            uint32_t m = (uint32_t)ptr[1] | ((uint32_t)ptr[2] << 8) |
+                         ((uint32_t)ptr[3] << 16) | ((uint32_t)ptr[4] << 24);
+            meta->mtime = (int32_t)m;
+            meta->has_mtime = true;
+        } else if (header_id == ZIP_EXTRA_BURST_XATTR_ID && data_size >= 1 && ptr[0] == 1 &&
+                   meta->xattrs == NULL) {
+            meta->xattrs = malloc(data_size - 1u + 1u);
+            if (!meta->xattrs) {
+                return false;
+            }
+            memcpy(meta->xattrs, ptr + 1, data_size - 1u);
+            meta->xattrs_len = (uint16_t)(data_size - 1u);
+        }
+        ptr += data_size;
+    }
+    return true;
+}
 
 /**
  * Parse Unix extra field (0x7875) to extract uid/gid.
@@ -398,7 +444,7 @@ static int parse_central_directory(
         if (ptr + variable_len > cd_end) {
             // Cleanup and return error
             for (size_t j = 0; j < i; j++) {
-                free(file_array[j].filename);
+                free_file_metadata_fields(&file_array[j]);
             }
             free(file_array);
             return CENTRAL_DIR_PARSE_ERR_TRUNCATED;
@@ -409,7 +455,7 @@ static int parse_central_directory(
         if (!file_array[i].filename) {
             // Cleanup and return error
             for (size_t j = 0; j < i; j++) {
-                free(file_array[j].filename);
+                free_file_metadata_fields(&file_array[j]);
             }
             free(file_array);
             return CENTRAL_DIR_PARSE_ERR_MEMORY;
@@ -425,6 +471,15 @@ static int parse_central_directory(
             file_array[i].has_unix_extra = parse_unix_extra_field(
                 extra_field_ptr, header->extra_field_length,
                 &file_array[i].uid, &file_array[i].gid);
+
+            if (!parse_attr_extra_fields(extra_field_ptr, header->extra_field_length,
+                                         &file_array[i])) {
+                for (size_t j = 0; j <= i; j++) {
+                    free_file_metadata_fields(&file_array[j]);
+                }
+                free(file_array);
+                return CENTRAL_DIR_PARSE_ERR_MEMORY;
+            }
 
             // Parse ZIP64 extra field (0x0001)
             // This updates sizes and offset with 64-bit values if they overflow 32-bit
@@ -855,7 +910,7 @@ int central_dir_parse_from_cd_buffer(const uint8_t *cd_buffer, size_t cd_buffer_
     if (rc != CENTRAL_DIR_PARSE_SUCCESS) {
         // Cleanup files on error
         for (size_t i = 0; i < result->num_files; i++) {
-            free(result->files[i].filename);
+            free_file_metadata_fields(&result->files[i]);
         }
         free(result->files);
         result->files = NULL;
@@ -960,7 +1015,7 @@ void central_dir_parse_result_free(struct central_dir_parse_result *result) {
 
     // Free each filename
     for (size_t i = 0; i < result->num_files; i++) {
-        free(result->files[i].filename);
+        free_file_metadata_fields(&result->files[i]);
     }
 
     // Free files array
@@ -976,4 +1031,57 @@ void central_dir_parse_result_free(struct central_dir_parse_result *result) {
 
     // Zero out structure
     memset(result, 0, sizeof(*result));
+}
+
+void apply_deferred_metadata(const struct central_dir_parse_result *result, const char *output_dir) {
+    if (!result || !output_dir) {
+        return;
+    }
+    size_t dir_len = strlen(output_dir);
+    for (size_t i = 0; i < result->num_files; i++) {
+        const struct file_metadata *meta = &result->files[i];
+        if (!meta->has_mtime && meta->xattrs_len == 0) {
+            continue;
+        }
+        size_t path_len = dir_len + 1 + strlen(meta->filename) + 1;
+        char *path = malloc(path_len);
+        if (!path) {
+            fprintf(stderr, "Warning: out of memory applying metadata\n");
+            return;
+        }
+        snprintf(path, path_len, "%s/%s", output_dir, meta->filename);
+
+        // name_len (1) | name | value_len (2, LE) | value, repeated
+        const uint8_t *p = meta->xattrs;
+        const uint8_t *end = meta->xattrs ? meta->xattrs + meta->xattrs_len : NULL;
+        char name[256];
+        while (p && p + 1 <= end) {
+            size_t name_len = p[0];
+            if (p + 1 + name_len + 2 > end) {
+                break;
+            }
+            memcpy(name, p + 1, name_len);
+            name[name_len] = '\0';
+            size_t value_len = (size_t)p[1 + name_len] | ((size_t)p[2 + name_len] << 8);
+            const uint8_t *value = p + 3 + name_len;
+            if (value + value_len > end) {
+                break;
+            }
+            if (lsetxattr(path, name, value, value_len, 0) != 0) {
+                fprintf(stderr, "Warning: failed to set xattr %s on %s: %s\n", name, path, strerror(errno));
+            }
+            p = value + value_len;
+        }
+
+        if (meta->has_mtime) {
+            struct timespec times[2] = {
+                { .tv_sec = (time_t)meta->mtime, .tv_nsec = 0 },
+                { .tv_sec = (time_t)meta->mtime, .tv_nsec = 0 },
+            };
+            if (utimensat(AT_FDCWD, path, times, AT_SYMLINK_NOFOLLOW) != 0) {
+                fprintf(stderr, "Warning: failed to set mtime on %s: %s\n", path, strerror(errno));
+            }
+        }
+        free(path);
+    }
 }
