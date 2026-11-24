@@ -64,8 +64,8 @@ struct file_metadata;
 
 // State machine states
 enum processor_state {
-    STATE_INIT,                 // Initial state, checking for continuing file
-    STATE_CONTINUING_FILE,      // Processing continuation from previous part
+    STATE_INIT,                 // Initial state, checking for a file started before this part
+    STATE_CHECK_PART_START,     // First frame decides: Start-of-Part continues last_file_before_part
     STATE_EXPECT_LOCAL_HEADER,  // Expecting ZIP local file header
     STATE_PROCESSING_FRAMES,    // Processing Zstd/skippable frames
     STATE_READING_SYMLINK,      // Reading raw symlink content (STORE method)

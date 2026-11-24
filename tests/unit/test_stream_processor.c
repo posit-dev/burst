@@ -255,7 +255,7 @@ static struct central_dir_parse_result *create_test_cd_result(
     result->parts[0].entries = calloc(1, sizeof(struct part_file_entry));
     result->parts[0].entries[0].file_index = 0;
     result->parts[0].entries[0].offset_in_part = local_header_offset;
-    result->parts[0].continuing_file = NULL;
+    result->parts[0].last_file_before_part = NULL;
 
     return result;
 }
@@ -464,10 +464,10 @@ void test_start_of_part_metadata(void) {
     cd->parts = calloc(2, sizeof(struct part_files));
     cd->parts[0].num_entries = 0;  // No files start in part 0
     cd->parts[0].entries = NULL;
-    cd->parts[0].continuing_file = NULL;
+    cd->parts[0].last_file_before_part = NULL;
     cd->parts[1].num_entries = 0;  // No files start in part 1
     cd->parts[1].entries = NULL;
-    cd->parts[1].continuing_file = &cd->files[0];  // Continuing from part 0
+    cd->parts[1].last_file_before_part = &cd->files[0];  // Continuing from part 0
 
     struct part_processor_state *state = part_processor_create(1, cd, test_output_dir, BURST_BASE_PART_SIZE);
     TEST_ASSERT_NOT_NULL(state);
@@ -766,7 +766,7 @@ static struct central_dir_parse_result *create_test_cd_result_multi(
     result->parts[0].entries[0].offset_in_part = offset1;
     result->parts[0].entries[1].file_index = 1;
     result->parts[0].entries[1].offset_in_part = offset2;
-    result->parts[0].continuing_file = NULL;
+    result->parts[0].last_file_before_part = NULL;
 
     return result;
 }
@@ -833,7 +833,7 @@ void test_wrong_frame_at_continuing_file(void) {
     // Put a padding frame instead of Start-of-Part frame
     offset += create_padding_frame(buffer + offset, 16);
 
-    // Create CD result with continuing_file set
+    // Create CD result with last_file_before_part set
     struct central_dir_parse_result *cd = calloc(1, sizeof(struct central_dir_parse_result));
     cd->num_files = 1;
     cd->files = calloc(1, sizeof(struct file_metadata));
@@ -845,10 +845,10 @@ void test_wrong_frame_at_continuing_file(void) {
     cd->parts = calloc(2, sizeof(struct part_files));
     cd->parts[0].num_entries = 0;
     cd->parts[0].entries = NULL;
-    cd->parts[0].continuing_file = NULL;
+    cd->parts[0].last_file_before_part = NULL;
     cd->parts[1].num_entries = 0;
     cd->parts[1].entries = NULL;
-    cd->parts[1].continuing_file = &cd->files[0];  // Expects Start-of-Part
+    cd->parts[1].last_file_before_part = &cd->files[0];  // Expects Start-of-Part
 
     struct part_processor_state *state = part_processor_create(1, cd, test_output_dir, BURST_BASE_PART_SIZE);
     TEST_ASSERT_NOT_NULL(state);
@@ -890,7 +890,7 @@ void test_continuing_candidate_ended_before_part(void) {
     cd->parts[1].num_entries = 1;
     cd->parts[1].entries = calloc(1, sizeof(struct part_file_entry));
     cd->parts[1].entries[0].file_index = 1;
-    cd->parts[1].continuing_file = &cd->files[0];
+    cd->parts[1].last_file_before_part = &cd->files[0];
 
     struct part_processor_state *state = part_processor_create(1, cd, test_output_dir, BURST_BASE_PART_SIZE);
     TEST_ASSERT_NOT_NULL(state);
